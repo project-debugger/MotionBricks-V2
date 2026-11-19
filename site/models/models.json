@@ -3,168 +3,80 @@
   "balanced": {
    "label": "Balanced - INT8 pose transformer",
    "source": "soma_int8_pose.onnx",
-   "bytes": 245027923,
-   "sha256": "f7c0b4b5e35bfc8c518366d6343fe4879d6fa2a018883103e34aaf32a0d4d2b0",
-   "fp16_initializers": 91,
+   "bytes": 192796206,
+   "sha256": "381931a74a28d65c5da315a8338346e32dfe1ea9e1ed2fb89ae1d5cb0c4ab086",
+   "int8_initializers": 86,
+   "fp16_initializers": 5,
    "parts": [
     {
      "file": "part000.bin",
      "bytes": 14680064,
-     "sha256": "aae2a5728d6b1fb166faa4b1fecd6c678659701397e434f487b004546d2f149e"
+     "sha256": "ccb44818ac1f59e271a59c24cd2dfb91075fa8f01c5dfb1614d6579a0bd52833"
     },
     {
      "file": "part001.bin",
      "bytes": 14680064,
-     "sha256": "a80644b68dc1921dfbabd8f882213818ba66bd993cd3f9a4f00a13fffc4ded67"
+     "sha256": "f9bd4df42342dcd6e62f09e7639784f909dc4b16838aa9591dbf83fa3f9b3b23"
     },
     {
      "file": "part002.bin",
      "bytes": 14680064,
-     "sha256": "993bb9840efdf4d8a468b5db5c11d5ccf3cc8cecd209b0dd160d5f98ea8008dc"
+     "sha256": "c2d8278baab6005a8cc35b40398ce5ec4926be41fc41c2427af11ce574f4ae99"
     },
     {
      "file": "part003.bin",
      "bytes": 14680064,
-     "sha256": "ac8dcb4dcb1b1159f7088b6098dc0d0c01d238f5b2228f2c1b4133625720ad8c"
+     "sha256": "768c8a513d8c687c42efb8d171019c8a825e4bd43b19fffbcc6b8859c1b568ee"
     },
     {
      "file": "part004.bin",
      "bytes": 14680064,
-     "sha256": "6f6b4e2867deacf50417428a87f972ac81a7f966ffff3ab78d0ea220cb79c2ef"
+     "sha256": "10b52c7830178f5b7a5dfa27a76af0dbe14dc176bca1887048d9b901f7dfb5f5"
     },
     {
      "file": "part005.bin",
      "bytes": 14680064,
-     "sha256": "aca23c5093e24ddebe3564f5f34c52c6172a17fc018e976cbe78f65495425a29"
+     "sha256": "1b7981d727aa7d43ef86bce46863511c45c909ccf2b6dd4a2678652cf13220d3"
     },
     {
      "file": "part006.bin",
      "bytes": 14680064,
-     "sha256": "26afb2d1d1bea3bde346637873e6650cc4732e6c874c98f4bd10f0a011f9e0f2"
+     "sha256": "6a733a32e794d6285c34805f0477e67ba95a231a43b1a7df55397677c8b9791b"
     },
     {
      "file": "part007.bin",
      "bytes": 14680064,
-     "sha256": "02aa138f102333863f4157921c4db72e2070c4df44f78fba6d5e2677d39ec7ca"
+     "sha256": "c6f508b84c858a98cc6e92ad73c4e009a4ea44cb77eb2bada1e1ae01a09a60d7"
     },
     {
      "file": "part008.bin",
      "bytes": 14680064,
-     "sha256": "7709dda1a30418f820eb390ff6722417ae2fc99177fd9c9a143ed8009bd97c2f"
+     "sha256": "ea77edf4b9c80ecc68b5ba93a5c94eb5117b83c4c13d77ad7f0cc967308d0fc1"
     },
     {
      "file": "part009.bin",
      "bytes": 14680064,
-     "sha256": "dc606aea07dd047896e37d2995979f4005b952f9009099b91ab8921a3ca63bbc"
+     "sha256": "ccda32495df33dc043112846fda8499541461bb57a71953cbe2ad0bd7bcccf3f"
     },
     {
      "file": "part010.bin",
      "bytes": 14680064,
-     "sha256": "7182689c1d718f3160d7c0e195cc8b1899501d176285723ad3b889c4ae232063"
+     "sha256": "15d85e18cf1ebc2ca7e66429333dfc047c31755b18f46efbb48a6eae6b8f7500"
     },
     {
      "file": "part011.bin",
      "bytes": 14680064,
-     "sha256": "96f8af9dfa35bbf1e429bf3620f07dce1f12a032a28bc19b889b0f6cffb7197a"
+     "sha256": "1769f2b65e4c5c6204fbcfcdb2e4d297f495c47b458a511cc6475a0769406a58"
     },
     {
      "file": "part012.bin",
      "bytes": 14680064,
-     "sha256": "057f464242c5331c489ab1c8e32bef53d8cbe0cf1266f0782380e4c3742508aa"
+     "sha256": "6d59aafb4e434cb10e913638d9170915940119e519243d9c007f08c8d20bc54f"
     },
     {
      "file": "part013.bin",
-     "bytes": 14680064,
-     "sha256": "27aeffb9f57e4f154e4244c8cbbf279cfe00348d23ba720ad96432c70ce5d7b4"
-    },
-    {
-     "file": "part014.bin",
-     "bytes": 14680064,
-     "sha256": "f5038a9087ca6f581a8c8fd45bc08ca29513f92ed3977134b70384e4d01b364a"
-    },
-    {
-     "file": "part015.bin",
-     "bytes": 14680064,
-     "sha256": "138a48ab0786ad9b43852a2d3f8f55b5314724485b0589672dfa0b47c01d14d8"
-    },
-    {
-     "file": "part016.bin",
-     "bytes": 10146899,
-     "sha256": "84f27f6db734370c76d5fbef8cb8d9c9435ec12f7d3e93978bc4319004d673d9"
-    }
-   ]
-  },
-  "light": {
-   "label": "Light - INT4 pose transformer",
-   "source": "soma_int4_pose.onnx",
-   "bytes": 187236058,
-   "sha256": "ff191db6766f79cb57bb00b3005f448b8a9c2e8eeb0f3983ee80e5f8ffebad2e",
-   "fp16_initializers": 164,
-   "parts": [
-    {
-     "file": "part000.bin",
-     "bytes": 14680064,
-     "sha256": "e55b642ed26bdaa1992799b94ba304426b4541d456c138f169f2e178cbb1d80b"
-    },
-    {
-     "file": "part001.bin",
-     "bytes": 14680064,
-     "sha256": "3c6dfc899878415bac8e2c917ed179a917de28002813b77f552269ad17393728"
-    },
-    {
-     "file": "part002.bin",
-     "bytes": 14680064,
-     "sha256": "3d32e373233f66c92a3269d433be096ffa9521ada2a8bd542a346ec33698fd9a"
-    },
-    {
-     "file": "part003.bin",
-     "bytes": 14680064,
-     "sha256": "1c3ec42d5626c3d90fc7eaf2c99fc6590f8ec70c068d034ca1b10f630af1233a"
-    },
-    {
-     "file": "part004.bin",
-     "bytes": 14680064,
-     "sha256": "c32c1e82a05b011ab23bee89fc54da4cf4de680ac2705d752e47a08d5bd01a30"
-    },
-    {
-     "file": "part005.bin",
-     "bytes": 14680064,
-     "sha256": "932dce9aff2bdd5a86119615b94957eafab359af661395c446530f0c90ac6c9c"
-    },
-    {
-     "file": "part006.bin",
-     "bytes": 14680064,
-     "sha256": "a5ac0d106107925592bfd30b1948de50b2a8ca3dc9fa2f4889797a6491509b88"
-    },
-    {
-     "file": "part007.bin",
-     "bytes": 14680064,
-     "sha256": "6b69bf69e426eb7e2a2ae986fe31bf899e1cae6e3e52e643053adabe5ad85016"
-    },
-    {
-     "file": "part008.bin",
-     "bytes": 14680064,
-     "sha256": "f74978e38cfdd0a48e8304b9f9e230fece43de22638c4bafc45f7e0287aec6ba"
-    },
-    {
-     "file": "part009.bin",
-     "bytes": 14680064,
-     "sha256": "fefab982219bcd393cebc6819eefdb963912df5341910cded8b1d8347d335d48"
-    },
-    {
-     "file": "part010.bin",
-     "bytes": 14680064,
-     "sha256": "63807dd7e3712dc4d787609f2967f4fc23a9749785d1ab8647df03712da12fa3"
-    },
-    {
-     "file": "part011.bin",
-     "bytes": 14680064,
-     "sha256": "d7f7cf0ff3338c15535226df02cdf0a0cba83c3b9161f7fea1b18f7f58adc724"
-    },
-    {
-     "file": "part012.bin",
-     "bytes": 11075290,
-     "sha256": "58194b1f452843b6870958a568299176eb21a56b8ddc6de671ba13e3addaae14"
+     "bytes": 1955374,
+     "sha256": "764e80f3fca416a0c39c7342144076f3bf907995fbc1a597f435f950e33aab57"
     }
    ]
   }
