@@ -1,0 +1,23 @@
+<!doctype html><meta charset="utf-8"><title>codec parity</title>
+<script type="module">
+import * as M from '../../js/math3d.js';
+import { bind, bindLimits, encode, postProcess } from '../../js/codec.js';
+try {
+  const [skel, lim, c] = await Promise.all(['../../data/skeleton.json', '../../data/joint_limits.json', 'parity.json'].map((u) => fetch(u).then((r) => r.json())));
+  const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
+  const b = bind(sk), bl = bindLimits(lim, sk), guides = c.guides.map((g) => Float64Array.from(g));
+  const { feeds, align } = encode(b, guides, c.nTargets, c.allowed);
+  const feedDiff = {};
+  for (const [k, v] of Object.entries(c.feeds)) { let m = 0; for (let i = 0; i < v.length; i++) m = Math.max(m, Math.abs(feeds[k][i] - v[i])); feedDiff[k] = m; }
+  const t0 = performance.now();
+  const { frames } = postProcess(b, bl, Float32Array.from(c.pred), c.tokens, align, guides, c.nTargets, { velocityMatching: true });
+  const ms = performance.now() - t0;
+  let pmax = 0, amax = 0;
+  frames.forEach((f, i) => { const e = c.frames[i]; for (let j = 0; j < 77; j++) {
+    for (let k = 0; k < 3; k++) pmax = Math.max(pmax, Math.abs(f[j * 7 + k] - e[j * 7 + k]));
+    const q = M.Q(f, j), r = [e[j * 7 + 3], e[j * 7 + 4], e[j * 7 + 5], e[j * 7 + 6]];
+    const d = Math.abs(q[0] * r[0] + q[1] * r[1] + q[2] * r[2] + q[3] * r[3]);
+    amax = Math.max(amax, 2 * Math.acos(Math.min(1, d)) * 180 / Math.PI); } });
+  window.RESULT = { feedDiff, frames: frames.length, expected: c.frames.length, posMaxDiff_m: pmax, rotMaxDiff_deg: amax, postprocess_ms: ms };
+} catch (e) { window.RESULT = { error: String(e.stack || e) }; }
+</script>

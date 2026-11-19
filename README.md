@@ -114,6 +114,14 @@ Lower level: `engine.generate(context_4_poses, target_1to4_poses)` returns a 30 
 `GeneratedMotion` (poses + foot contacts); `generate_batch` serves many characters in one call;
 `submit` runs on a worker thread. Export anything with `somart.bvh_writer.write_bvh`.
 
+## Web playground
+
+`site/` is a playable browser demo: the real SOMA network (INT8 or INT4 copy) runs in the browser
+with onnxruntime-web, driven by phone touch controls or keyboard and mouse, rendered on NVIDIA's
+SOMA body mesh. Model, presets and quality passes can be switched in its settings panel.
+See [site/README.md](site/README.md) for controls, local serving and GitHub Pages deployment
+(`.github/workflows/pages.yml`).
+
 ## Repository layout
 
 ```
@@ -129,6 +137,7 @@ docs/                      architecture, optimization, animation, configuration,
                            training, limitations
 examples/                  quickstart.py
 tests/                     pytest suite
+site/                      playable web demo (browser runtime, web model parts, data)
 third_party/               upstream MotionBricks clone (not in git)
 ```
 
@@ -147,12 +156,15 @@ third_party/               upstream MotionBricks clone (not in git)
 - No training or fine-tuning was performed; all variants are export/precision/quantization of
   NVIDIA's weights. The released model is **human-only**; animal files are templates.
 - No GPU was available: TensorRT and VRAM were not measured.
-- Sample clips are evaluation-licensed and stay local (`third_party/`, `datasets/soma_eval/`).
+- Sample clips are evaluation-licensed and stay local (`third_party/`, `datasets/soma_eval/`);
+  only the web playground's derived motion windows are committed (`site/data/`).
 
 ## Licences
 
 Weights: [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/).
 Upstream MotionBricks software: Apache-2.0 (used unmodified from `third_party/`).
-Sample motions: NVIDIA Sample Data Evaluation License (not redistributed).
+Sample motions: NVIDIA Sample Data Evaluation License (not redistributed; `site/data/windows.*` is
+derived from them for the private web playground).
+SOMA body mesh (in `site/data/`): NVIDIA, CC BY 4.0. Web runtime: onnxruntime-web, three.js (MIT).
 Code in this repository: no licence has been chosen yet (add a `LICENSE` file). Parts of
 `runtime/somart` are NumPy ports of Apache-2.0 upstream code — see [NOTICE](NOTICE).

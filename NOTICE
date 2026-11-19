@@ -13,5 +13,12 @@ The upstream ONNX exporter (tools/onnx) is used unmodified from third_party/ (no
 Changes relative to upstream: vectorised NumPy implementation, batching, and the additional
 velocity-matching and contact-aware options in codec.py.
 
-Model weights: NVIDIA Open Model Agreement. Sample motion clips: NVIDIA Sample Data Evaluation
-License (not redistributed in this repository).
+Model weights: NVIDIA Open Model Agreement ("Licensed by NVIDIA Corporation under the NVIDIA Open
+Model License"). site/models/ holds INT8/INT4-quantized, FP16-stored derivatives for the web demo.
+Sample motion clips: NVIDIA Sample Data Evaluation License. The clips are not redistributed here;
+site/data/windows.* contains motion windows derived from them (internal evaluation use).
+SOMA body mesh (site/data/soma_mesh.*): extracted from the upstream MotionBricks asset
+soma_base_skel_minimal_no_root.usd, NVIDIA, CC BY 4.0.
+
+site/vendor/ redistributes, unmodified: onnxruntime-web 1.31.1 (Microsoft, MIT), three.js 0.170.0
+(MIT); site/coi-serviceworker.js (Guido Zuidhof, MIT). Licence texts are in site/vendor/.

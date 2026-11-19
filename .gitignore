@@ -29,3 +29,5 @@ showcase/build/renderer/node_modules/
 showcase/build/renderer/package-lock.json
 showcase/build/cache/
 site/models/*/model.onnx.local
+site/build/node_modules/
+site/build/package-lock.json

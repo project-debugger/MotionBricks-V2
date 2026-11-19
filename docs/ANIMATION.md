@@ -16,9 +16,12 @@ in `benchmarks/` (held-out mocap comparisons, and a real-time 60 Hz gameplay scr
 | **Inertialization** of any spliced discontinuity | `postprocess.Inertializer` | hides late results / runtime overrides without cross-fade "ghosting" |
 | **Spring-damper locomotion** with accel/decel caps, inertia, momentum, turn-rate limit | `controller._simulate` | natural acceleration/deceleration curves; heavier/lighter characters via config |
 | **Target variation band** | `clips.match(variation=…)` | non-repeating choice among near-equal mocap windows |
+| **Anatomical joint limits** learned from the mocap (knees and elbows as pure hinges, 1–2-axis toes, fixed jaw; children keep their world rotation) | `anatomy.JointLimits` (`configs/skeletons/soma_joint_limits.json`, `tools/fit_joint_limits.py`) | removes forearm twist of up to 17° off the elbow hinge and ~6° of shin bowing; MPJPE 8.96 → 9.03 cm, hand and foot orientation unchanged |
+| **Relaxed hands + procedural fingers** (the model predicts no finger joints) | `anatomy.FingerAnimator` | 47 unpredicted joints get the mocap's relaxed pose instead of the rig's flat zero pose; curl grows with speed, follow-through on wrist swings, per-finger variation; 0.44 ms per frame |
 
 Not done: physics-based balance or contact dynamics (MotionBricks is kinematic); pose-space
-foot-ground penetration correction beyond ankle locking; hand IK for object interaction.
+foot-ground penetration correction beyond ankle locking; hand IK for object interaction. Finger
+motion is procedural, not learned: no finger data exists in the model or the samples.
 
 ## Supported actions
 

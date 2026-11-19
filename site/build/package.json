@@ -1,0 +1,10 @@
+{
+  "name": "soma-playground-build",
+  "private": true,
+  "description": "Pinned third-party files copied into site/vendor by site/build/vendor.sh",
+  "dependencies": {
+    "coi-serviceworker": "^0.1.7",
+    "onnxruntime-web": "1.31.1",
+    "three": "0.170.0"
+  }
+}

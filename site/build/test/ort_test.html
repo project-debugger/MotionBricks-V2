@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ORT web test</title>
+<script type="module">
+import * as ort from '../../vendor/ort/ort.wasm.min.mjs';
+ort.env.wasm.wasmPaths = new URL('../../vendor/ort/', location.href).href;
+const q = new URLSearchParams(location.search);
+ort.env.wasm.numThreads = +(q.get('threads') || 1);
+const log = (m) => { (window.LOG ||= []).push(m); };
+try {
+  const key = q.get('model') || 'balanced';
+  const idx = await (await fetch('../../models/models.json')).json();
+  const info = idx.models[key];
+  const buf = new Uint8Array(info.bytes);
+  let off = 0;
+  const t0 = performance.now();
+  for (const p of info.parts) {
+    const b = new Uint8Array(await (await fetch(`../../models/${key}/${p.file}`)).arrayBuffer());
+    buf.set(b, off); off += b.length;
+  }
+  const t1 = performance.now();
+  const sess = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+  const t2 = performance.now();
+  const vec = await (await fetch('vector.json')).json();
+  const feeds = {};
+  for (const [k, v] of Object.entries(vec.inputs)) {
+    feeds[k] = new ort.Tensor(v.type, v.type === 'int32' ? Int32Array.from(v.data) : Float32Array.from(v.data), v.dims);
+  }
+  let out = await sess.run(feeds);
+  const times = [];
+  for (let i = 0; i < 3; i++) { const a = performance.now(); out = await sess.run(feeds); times.push(performance.now() - a); }
+  const pred = out.pred_global_motions.data, tok = out.pred_num_tokens.data[0];
+  let maxd = 0;
+  for (let i = 0; i < vec.expected.pred_first.length; i++) maxd = Math.max(maxd, Math.abs(pred[i] - vec.expected.pred_first[i]));
+  window.RESULT = { ok: true, threads: ort.env.wasm.numThreads, isolated: self.crossOriginIsolated, download_ms: t1 - t0,
+    session_ms: t2 - t1, run_ms: times, tokens: Number(tok), expected_tokens: vec.expected.tokens, max_abs_diff: maxd };
+} catch (e) { window.RESULT = { ok: false, error: String(e && e.stack || e) }; }
+</script>

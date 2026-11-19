@@ -40,6 +40,15 @@
 - Dodge uses a combat quick-step as an approximation; sprint is capped by the fastest sample run
   (~5.5 m/s).
 - Target matching uses root velocity only (plus crouch flag); no foot-phase matching.
+- Fingers, toes beyond their learned 1–2 axes, and the jaw are not predicted by the model: hands
+  use a procedural layer (`FingerAnimator`), toes and jaw are clamped to mocap ranges. No hand
+  contact, gripping or facial animation.
+- Joint limits are fitted to the 38 sample clips (plus 3° margin); poses outside that range
+  (deep squats, splits, acrobatics) would be clamped.
+- Web playground (`site/`): phone performance is unmeasured (no device here). Measured on this
+  machine's CPU: ~0.3 s per generation with 4 WASM threads (Balanced), ~0.8–1.0 s single-threaded
+  (Light). Slower devices get longer planned segments, so reactions to input lag more. First
+  visit downloads 187–245 MB.
 - Single character per controller; batching several characters into one network call is
   supported by `SomaEngine.generate_batch` but not yet scheduled automatically by the controller.
 
@@ -56,3 +65,7 @@
   locally by `tools/fetch_upstream.py`.
 - Model weights (NVIDIA Open Model Agreement) are downloaded, not committed (size); exact
   checksums are committed in `models/soma/checksums/`.
+- Exception for the web playground: `site/models/` (INT8/INT4 web copies of the weights) and
+  `site/data/windows.*` (motion windows derived from the evaluation-licensed sample clips) are
+  committed so the site can be served. The repository is private; enabling GitHub Pages would
+  make both public (see `site/README.md`).

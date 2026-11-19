@@ -1,0 +1,74 @@
+# Deploys the SOMA Playground (site/) to GitHub Pages.
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+# Until Pages is enabled the job only prints a notice, so pushes do not fail.
+# NOTE: a Pages site is public. site/data/windows.* is derived from NVIDIA sample clips under the
+# NVIDIA Sample Data Evaluation License; see site/README.md before enabling Pages.
+name: Deploy SOMA Playground
+
+on:
+  push:
+    branches: [ccr-468f6080-jy7q4r]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check that GitHub Pages is enabled
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" --jq .build_type > /dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GitHub Pages is not enabled for this repository. Enable it in Settings -> Pages (Source: GitHub Actions), then re-run this workflow."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.pages.outputs.enabled == 'true'
+        with:
+          sparse-checkout: site
+          fetch-depth: 1
+
+      - name: Stage site
+        if: steps.pages.outputs.enabled == 'true'
+        run: |
+          rsync -a --exclude 'build/' --exclude 'index.src.html' --exclude '*.local' site/ _site/
+          touch _site/.nojekyll
+          du -sh _site
+          python3 - <<'EOF'
+          import hashlib, json, pathlib
+          site = pathlib.Path("_site")
+          for key, m in json.loads((site / "models/models.json").read_text())["models"].items():
+              for p in m["parts"]:
+                  f = site / "models" / key / p["file"]
+                  assert hashlib.sha256(f.read_bytes()).hexdigest() == p["sha256"], f"checksum mismatch: {f}"
+              print(f"{key}: {len(m['parts'])} parts verified")
+          EOF
+
+      - uses: actions/configure-pages@v5
+        if: steps.pages.outputs.enabled == 'true'
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outputs.enabled == 'true'
+        with:
+          path: _site
+
+      - id: deployment
+        if: steps.pages.outputs.enabled == 'true'
+        uses: actions/deploy-pages@v4
