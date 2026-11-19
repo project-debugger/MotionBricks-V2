@@ -28,6 +28,7 @@ from . import math3d as m3
 from .clips import ClipLibrary, place
 from .config import Config
 from .engine import GenerationRequest, SomaEngine
+from .anatomy import FingerAnimator, JointLimits
 from .postprocess import FootLocker, Inertializer, Smoother, scale_intensity
 
 FPS = C.SAMPLE_RATE
@@ -111,6 +112,25 @@ class CharacterController:
                                max_correction=fl.get("max_correction", 0.12), blend_in=fl.get("blend_in", 0.06),
                                blend_out=fl.get("blend_out", 0.1), ground=self.cfg.get("animation.ground_height"))
         self.smoother = Smoother(float(self.cfg.get("animation.smoothing")))
+        # anatomy: learned joint constraints (engine + after IK) and procedural fingers
+        self.limits = None
+        self.fingers = None
+        lim_path = self.cfg.get("skeleton.joint_limits")
+        if self.cfg.get("generation.anatomical_constraints") and lim_path:
+            from .config import REPO_ROOT
+            p = REPO_ROOT / lim_path if not str(lim_path).startswith("/") else lim_path
+            limits = JointLimits.load(p)
+            if engine.limits is None:
+                engine.set_joint_limits(limits)
+            self.limits = limits.bind(self.sk)
+            fcfg = self.cfg.section("animation").get("fingers", {})
+            if fcfg.get("enabled", True):
+                relaxed = self.limits.apply(self.buffer[:1], relax_unmapped=True)[0]
+                self.fingers = FingerAnimator(self.sk, relaxed, curl_idle=fcfg.get("curl_idle", 6.0),
+                                              curl_walk=fcfg.get("curl_walk", 12.0), curl_run=fcfg.get("curl_run", 32.0),
+                                              follow=fcfg.get("follow_through", 10.0),
+                                              variation=fcfg.get("variation", 3.0), seed=int(self.cfg.get("animation.seed")))
+            self.buffer = self.limits.apply(self.buffer, relax_unmapped=True)
         self.last_display: np.ndarray | None = None
         self.prev_display: np.ndarray | None = None
         config.on_change(self._on_config_change)
@@ -253,7 +273,8 @@ class CharacterController:
         req = GenerationRequest(context, target, allowed_tokens=allowed,
                                 correct_endpoints=bool(gen["correct_endpoints"]),
                                 match_velocity=bool(gen.get("velocity_matching", False)),
-                                velocity_tau=float(gen.get("velocity_matching_tau", 4.0)))
+                                velocity_tau=float(gen.get("velocity_matching_tau", 4.0)),
+                                anatomical=self.limits is not None)
         info = {"switch": k, "submitted": time.perf_counter(), "action": action}
         if self.sync:
             res = self.engine.generate_batch([req])[0]
@@ -389,6 +410,10 @@ class CharacterController:
             pose = self.inertializer.apply(pose, dt)
         if anim["foot_locking"]["enabled"]:
             pose = self.feet.apply(pose, self._sample_contacts(self.time), dt)
+        if self.limits is not None:  # foot-lock IK may bend knees off their hinge
+            pose = self.limits.apply(pose)
+        if self.fingers is not None:
+            pose = self.fingers.apply(pose, float(np.linalg.norm(self.sim_vel)), dt)
         pose = self.smoother.apply(pose, dt)
         self.prev_display, self.last_display = self.last_display, pose
         return pose

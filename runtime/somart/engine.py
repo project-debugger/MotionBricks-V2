@@ -29,6 +29,7 @@ class GenerationRequest:
     correct_endpoints: bool = True
     match_velocity: bool = False   # velocity-continuous joins (somart addition, see codec.velocity_matching)
     velocity_tau: float = 4.0      # frames
+    anatomical: bool = False       # hinge knees/elbows, fixed jaw, relaxed fingers (needs joint limits)
 
 
 @dataclass
@@ -53,6 +54,11 @@ class SomaEngine:
         self.keep_raw = keep_raw
         self._pool: ThreadPoolExecutor | None = None
         self.last_timings: dict = {}
+        self.limits = None  # BoundLimits, see set_joint_limits()
+
+    def set_joint_limits(self, limits) -> None:
+        """Enable anatomical clean-up (somart.anatomy.JointLimits) for requests with anatomical=True."""
+        self.limits = limits.bind(self.skeleton) if limits is not None else None
 
     # ------------------------------------------------------------------ encoding
     def build_inputs(self, requests: list[GenerationRequest]):
@@ -88,6 +94,9 @@ class SomaEngine:
         pred, tokens = self.backend.run(feats)
         t2 = time.perf_counter()
         poses, contacts, counts = codec.decode(pred, tokens, self.binding, aligns)
+        anat = [i for i, r in enumerate(requests) if r.anatomical and self.limits is not None]
+        if anat:  # before endpoint correction: relaxed fingers instead of the rig's zero pose
+            poses[anat] = self.limits.apply(poses[anat], relax_unmapped=True)
         t3 = time.perf_counter()
         need = [i for i, r in enumerate(requests) if r.correct_endpoints]
         if need:
@@ -101,6 +110,8 @@ class SomaEngine:
                     poses[i:i + 1], counts[i:i + 1], local[i:i + 1, C.POSES_PER_TOKEN - 2],
                     local[i:i + 1, C.POSES_PER_TOKEN - 1], local[i:i + 1, C.POSES_PER_TOKEN],
                     local[i:i + 1, C.POSES_PER_TOKEN + 1] if k >= 2 else None, r.velocity_tau)
+        if anat:  # corrections can re-introduce small off-axis rotations
+            poses[anat] = self.limits.apply(poses[anat])
         t4 = time.perf_counter()
         timings = {"encode": (t1 - t0) * 1e3, "inference": (t2 - t1) * 1e3, "decode": (t3 - t2) * 1e3,
                    "post_process": (t4 - t3) * 1e3, "total": (t4 - t0) * 1e3, "batch": len(requests)}

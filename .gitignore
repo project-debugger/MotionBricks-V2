@@ -28,3 +28,4 @@ benchmarks/output/
 showcase/build/renderer/node_modules/
 showcase/build/renderer/package-lock.json
 showcase/build/cache/
+site/models/*/model.onnx.local

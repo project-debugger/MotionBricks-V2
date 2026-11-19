@@ -34,6 +34,7 @@ generation:
   correct_endpoints: true       # pose accuracy: snap start/end exactly to context and target
   velocity_matching: true       # also make velocities continuous at the joins (removes pops)
   velocity_matching_tau: 4.0    # frames over which the velocity correction fades
+  anatomical_constraints: true  # hinge knees/elbows, toe axes, fixed jaw (learned from mocap), relaxed fingers
   prediction_horizon: 0.8       # s: how far ahead targets are placed (shorter = snappier, longer = smoother)
   duration_mode: horizon        # horizon: segment length pinned to the horizon (responsive);
                                 # model: the network picks min..max tokens itself (upstream behaviour)
@@ -72,12 +73,20 @@ animation:
     blend_in: 0.06              # s
     blend_out: 0.10             # s
   ground_height: 0.0
+  fingers:                      # procedural layer: the model and its training data have no finger motion
+    enabled: true
+    curl_idle: 6.0              # deg of extra curl when standing
+    curl_walk: 12.0
+    curl_run: 32.0              # runners close the hand more
+    follow_through: 10.0        # how much fingers lag fast wrist swings
+    variation: 3.0              # deg of slow per-finger variation
 
 skeleton:
   name: soma
   definition: ""                # optional skeleton JSON; empty = SOMA rig from the clip library
   scale: 1.0
   root: Hips
+  joint_limits: configs/skeletons/soma_joint_limits.json   # learned by tools/fit_joint_limits.py
 
 clips:
   root: third_party/motionbricks/assets/motions/soma

@@ -41,6 +41,9 @@ RANGES: dict[str, tuple[float, float]] = {
     "animation.foot_locking.contact_threshold": (0.0, 1.0), "animation.foot_locking.release_threshold": (0.0, 1.0),
     "animation.foot_locking.max_correction": (0.0, 1.0), "animation.foot_locking.blend_in": (0.0, 1.0),
     "animation.foot_locking.blend_out": (0.0, 1.0), "skeleton.scale": (0.01, 100.0),
+    "animation.fingers.curl_idle": (-30.0, 90.0), "animation.fingers.curl_walk": (-30.0, 90.0),
+    "animation.fingers.curl_run": (-30.0, 90.0), "animation.fingers.follow_through": (0.0, 60.0),
+    "animation.fingers.variation": (0.0, 20.0),
 }
 FREE_FORM = ("actions", "characters", "skeletons", "inference.models_by_device")
 CHOICES = {
