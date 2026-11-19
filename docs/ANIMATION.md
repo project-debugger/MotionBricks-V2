@@ -53,7 +53,10 @@ ctrl.trigger("roll")
 or in YAML (`actions:` section). Clips must be on the SOMA skeleton (same joint names), at any
 frame rate (resampled to 30 Hz). `key` chooses the target pose: `min_height`, `max_height`,
 `middle`, `end`, or a fraction 0–1 of the clip. One-shot actions keep the model-chosen duration
-and suppress replanning until the segment has nearly played.
+and suppress replanning until the segment has nearly played. By default the target is placed on
+the predicted gameplay trajectory; `anchor: clip` instead places it with the clip's own root
+motion relative to the current body (used by `stand_up` and the seated hold `sit_idle`), and
+gameplay then follows that root motion.
 
 ## Transitions between actions
 

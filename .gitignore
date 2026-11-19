@@ -23,3 +23,8 @@ datasets/soma_eval/
 benchmarks/results/_dumps/
 benchmarks/results/tmp/
 benchmarks/output/
+
+# Showcase renderer: npm deps and generated intermediates (rebuild with showcase/build/make_all.sh)
+showcase/build/renderer/node_modules/
+showcase/build/renderer/package-lock.json
+showcase/build/cache/

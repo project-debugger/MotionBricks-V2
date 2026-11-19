@@ -27,6 +27,10 @@ built on the untouched released checkpoints.
 
 Measured on: Intel Xeon (AVX-512 VNNI, AMX), 4 vCPU, 15.7 GB RAM, **no GPU**.
 
+**Watch it:** [`showcase/`](showcase/) has 13 rendered 1080p videos of the real model output
+(gallery: [`showcase/index.html`](showcase/index.html), all-in-one ZIP:
+[`showcase/MotionBricks_SOMA_showcase.zip`](showcase/MotionBricks_SOMA_showcase.zip)).
+
 ## Results at a glance
 
 | Model (CPU, ORT 1.32) | File | Peak RAM | Network p50, 4 thr / 1 thr | Accuracy vs mocap (MPJPE) | Same duration as FP32 |

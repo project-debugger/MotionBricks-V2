@@ -85,6 +85,8 @@ clips:
 
 # Per-action settings. `source` = clip file or folder (relative to clips.root); `key` picks the
 # target pose of one-shot actions: min_height | max_height | middle | end | fraction 0..1.
+# `anchor: clip` places that pose using the clip's own root motion relative to the current body
+# (root-motion actions such as standing up); otherwise it is placed on the gameplay trajectory.
 # Nested locomotion/animation/generation keys override the base settings for that action.
 actions:
   idle:      {source: locomotion/idle/idle_loop_001__A268.bvh, kind: loop}
@@ -98,7 +100,8 @@ actions:
   duck:      {source: avoidance/neutral_avoid_obstacle_bend_down_jog_ff_180_R_001__A544.bvh, kind: oneshot, key: min_height}
   dodge:     {source: variations/combat_quickstep_ff_idle_180_R_002__A365.bvh, kind: oneshot, key: middle}
   sit:       {source: sitting/sit_on_chair_start_R_001__A047.bvh, kind: oneshot, key: min_height}
-  stand_up:  {source: sitting/sit_on_chair_stop_R_001__A047.bvh, kind: oneshot, key: end}
+  sit_idle:  {source: sitting/sit_on_chair_loop.bvh, kind: oneshot, key: middle, anchor: clip}
+  stand_up:  {source: sitting/sit_on_chair_stop_R_001__A047.bvh, kind: oneshot, key: end, anchor: clip}
 
 # Per-character overrides, e.g. characters: {heavy_guard: {locomotion: {inertia: 1.6}}}
 characters: {}

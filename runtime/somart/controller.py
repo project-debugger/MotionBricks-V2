@@ -221,10 +221,22 @@ class CharacterController:
             names = self.lib.find(acfg["source"])
             if not names:
                 raise KeyError(f"action '{action}': no clip matches '{acfg['source']}'")
-            win = self.lib.window_at(names[0], self._key_frame(names[0], acfg.get("key", "middle")))
-            fp = self.sim_pos + np.array([math.sin(self.sim_yaw), 0, math.cos(self.sim_yaw)]) * float(
-                np.linalg.norm(self.sim_vel)) * horizon
-            target = place(win.local, fp, self.sim_yaw)
+            key = self._key_frame(names[0], acfg.get("key", "middle"))
+            win = self.lib.window_at(names[0], key)
+            if acfg.get("anchor") == "clip":
+                # Root-motion action (e.g. stand up, seated loop): place the key pose using the clip's
+                # own root displacement/turn from its first frame, relative to the body on screen at
+                # the switch frame; gameplay then follows that root motion.
+                fp, fyaw = self._clip_anchored(names[0], key, self.buffer[k])
+                self.sim_pos, self.sim_vel, self.sim_acc = fp.copy(), np.zeros(3), np.zeros(3)
+                self.sim_yaw = fyaw
+                target = place(win.local, fp, fyaw)
+            else:
+                # Place the action where the gameplay trajectory will actually be (same prediction as
+                # locomotion). Extrapolating the current velocity put e.g. a "sit" ~1 m past the point
+                # where the character stops, so follow-up seated targets slid the body back.
+                fp, _, _ = self.predict(horizon, goal)
+                target = place(win.local, fp, self.sim_yaw)
             self.current_action = action
             allowed = tuple(self.cfg.allowed_tokens)  # actions keep the model-chosen duration
         else:
@@ -251,6 +263,26 @@ class CharacterController:
             self.pending_info = info
         self.frames_since_plan = 0
         self.last_goal_vel = goal.copy()
+
+    def _ground_and_yaw(self, local_pose: np.ndarray) -> tuple[np.ndarray, float]:
+        w = self.sk.fk(local_pose[None])[0]
+        r, l = self.sk.index(C.HEADING_JOINTS[0]), self.sk.index(C.HEADING_JOINTS[1])
+        from .codec import heading_from_hips
+        return w[0, :3] * np.array([1.0, 0.0, 1.0]), float(heading_from_hips(w[r, :3], w[l, :3]))
+
+    def _clip_anchored(self, name: str, key: int, current_pose: np.ndarray) -> tuple[np.ndarray, float]:
+        """Target (position, yaw) = current body + the clip's root motion from frame 0 to `key`."""
+        clip = self.lib.clips[name]
+        p0, y0 = self._ground_and_yaw(clip.local[0])
+        pk, yk = self._ground_and_yaw(clip.local[key])
+        pc, yc = self._ground_and_yaw(current_pose)
+        d = pk - p0
+        c0, s0 = math.cos(-y0), math.sin(-y0)
+        # express the displacement in the clip's start-facing frame, then in the current facing frame
+        local = np.array([c0 * d[0] + s0 * d[2], 0.0, -s0 * d[0] + c0 * d[2]])
+        c1, s1 = math.cos(yc), math.sin(yc)
+        world = np.array([c1 * local[0] + s1 * local[2], 0.0, -s1 * local[0] + c1 * local[2]])
+        return pc + world, float(m3.wrap_angle(yc + (yk - y0)))
 
     def _key_frame(self, name: str, key) -> int:
         """Frame of an action clip used as its target: min_height | max_height | middle | end | 0..1."""
