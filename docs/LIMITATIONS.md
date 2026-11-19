@@ -8,7 +8,7 @@
 - **Noisy shared VM**: run-to-run latency varies by ±20–30 %. Relative comparisons use the
   interleaved benchmark; absolute numbers will differ on other machines.
 - **4 vCPUs**: the game loop and generation share cores; generation latency in the controller
-  benchmark (~60–70 ms) is higher than in isolation (~44 ms).
+  benchmark (49–93 ms p50 depending on preset) is higher than in isolation (~44 ms for INT8-pose).
 
 ## Model limitations (inherited from the released SOMA model)
 
@@ -24,8 +24,8 @@
 ## Optimization limitations
 
 - INT8/INT4 quantization of the **root model** degrades motion measurably; only the pose
-  transformer is quantized in the recommended variants. No speed-up beyond ~1.6× (4 threads) /
-  ~2.6× (1 thread) was found on this CPU while keeping FP32-level accuracy.
+  transformer is quantized in the recommended variants. On this CPU the speed-up at FP32-level
+  accuracy is ~1.4–1.5× (4 threads) / ~2.0× (1 thread); full INT8 reaches ~1.6× / ~2.5× with worse motion.
 - FP16/BF16 bring no CPU speed-up at batch size 1.
 - Attention is not fused (exported as MatMul+Softmax); static INT8 (QDQ) not attempted.
 - `fp32_ortopt` is tied to the onnxruntime version that produced it (regenerate after upgrades).

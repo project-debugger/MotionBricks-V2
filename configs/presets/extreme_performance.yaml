@@ -1,4 +1,4 @@
-# EXTREME PERFORMANCE - fastest network (full INT8: x1.6 at 4 threads, x2.6 at 1 thread vs FP32),
+# EXTREME PERFORMANCE - fastest network (full INT8: x1.6 at 4 threads, x2.5 at 1 thread vs FP32),
 # fewer replans, no IK. Trades accuracy for throughput (MPJPE 8.67 cm vs 6.96 cm): for crowds/LODs.
 profile: extreme_performance
 inference:

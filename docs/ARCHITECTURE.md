@@ -83,7 +83,7 @@ token counts; outputs `[N,64,366]` + token count. 30 Hz, Y-up, metres.
   needed (late results are hidden by inertialization and counted).
 - **Duration pinning** (`duration_mode: horizon`): the segment length is set from the prediction
   horizon and the target is placed where the trajectory will be when the segment ends — this is
-  what brought body response from 1.45 s to 0.40 s (see `benchmarks/REPORT_controller.md`).
+  what brought body response from 1.38 s to 0.41 s and tracking error from 1.31 m to 0.13 m (see `benchmarks/REPORT_controller.md`).
 - **Targets**: `ClipLibrary.match` picks the window whose local root velocity best matches the
   predicted velocity (crouch-aware, optional random variation band), placed at the predicted
   position/facing. One-shot actions use a configured key pose of their clip and commit the segment.

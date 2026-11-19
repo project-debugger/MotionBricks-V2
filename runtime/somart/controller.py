@@ -58,6 +58,8 @@ class ControllerStats:
     generations: int = 0
     late_results: int = 0
     replans_from_input: int = 0
+    failures: int = 0
+    last_error: str = ""
     latency_ms: list = field(default_factory=list)
 
 
@@ -285,6 +287,7 @@ class CharacterController:
             self.contacts = self.contacts[drop:]
             self.time -= drop * DT
             now -= drop
+            self.commit_end -= drop  # keep an existing action commitment in buffer coordinates
         if info.get("action"):
             # commit to the action: no periodic/input replans until the segment is nearly played
             margin = self._latency_est * FPS + float(self.cfg.get("generation.replan_lead")) + 2
@@ -326,9 +329,13 @@ class CharacterController:
         self._simulate(goal, cmd, dt)
 
         if self.pending is not None and self.pending.done():
-            res = self.pending.result()[0]
-            info, self.pending, self.pending_info = self.pending_info, None, None
-            self._splice(res, info)
+            info, fut = self.pending_info, self.pending
+            self.pending, self.pending_info = None, None
+            try:
+                self._splice(fut.result()[0], info)
+            except Exception as exc:  # noqa: BLE001 - never let a failed generation kill the game loop
+                self.stats.failures += 1
+                self.stats.last_error = repr(exc)
 
         remaining = len(self.buffer) - 1 - self._frame_index()
         input_changed = np.linalg.norm(goal - self.last_goal_vel) > float(gen["input_replan_threshold"])

@@ -1,5 +1,5 @@
 # ULTRA QUALITY - reference-accurate FP32 network, longest planning horizon, all clean-up passes.
-# CPU: FP32 graph pre-optimized by ONNX Runtime (identical output, 35% faster load measured).
+# CPU: FP32 graph pre-optimized by ONNX Runtime (identical output, 27-35% faster load measured).
 # GPU: TensorRT/CUDA/DirectML/CoreML FP32 when the installed onnxruntime build provides them.
 profile: ultra_quality
 inference:

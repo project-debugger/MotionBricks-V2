@@ -58,7 +58,6 @@ class SomaEngine:
     def build_inputs(self, requests: list[GenerationRequest]):
         sk = self.skeleton
         guides, ntargets, allowed, aligns = [], [], [], []
-        self._ntargets = ntargets
         for r in requests:
             ctx = np.asarray(r.context, dtype=np.float64)
             if ctx.shape[0] != C.POSES_PER_TOKEN:
@@ -77,12 +76,14 @@ class SomaEngine:
             aligns = codec.guide_alignment(world, self.binding, heading)
         feats = codec.encode(world, self.binding, aligns)
         feats.update(codec.conditions(np.array(ntargets), allowed))
+        feats["_num_targets"] = np.array(ntargets)  # not a model input; returned per call (thread-safe)
         return feats, aligns, local
 
     # ---------------------------------------------------------------- generation
     def generate_batch(self, requests: list[GenerationRequest]) -> list[GeneratedMotion]:
         t0 = time.perf_counter()
         feats, aligns, local = self.build_inputs(requests)
+        ntargets = feats.pop("_num_targets")
         t1 = time.perf_counter()
         pred, tokens = self.backend.run(feats)
         t2 = time.perf_counter()
@@ -95,7 +96,7 @@ class SomaEngine:
             poses[need] = corr
         for i, r in enumerate(requests):
             if r.match_velocity:
-                k = self._ntargets[i]
+                k = int(ntargets[i])
                 poses[i:i + 1] = codec.velocity_matching(
                     poses[i:i + 1], counts[i:i + 1], local[i:i + 1, C.POSES_PER_TOKEN - 2],
                     local[i:i + 1, C.POSES_PER_TOKEN - 1], local[i:i + 1, C.POSES_PER_TOKEN],

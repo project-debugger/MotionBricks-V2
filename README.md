@@ -10,15 +10,17 @@ built on the untouched released checkpoints.
   upstream checksum files), and an **ONNX export proven equal to NVIDIA's official one**.
 - **Optimized model variants** (ORT-pre-optimized FP32, mixed FP16, INT8, INT4, pose-only
   INT8/INT4) with a measured accuracy/speed/memory trade-off. The recommended **INT8-pose**
-  variant runs **1.5× (4 threads) to 2.0× (1 thread) faster** than FP32, with **half the RAM**, and
+  variant runs **1.4–1.5× (4 threads) to 2.0× (1 thread) faster** than FP32 (two independent
+  benchmark runs), with **half the RAM**, and
   picks the same motion duration as FP32 in 98.9 % of held-out requests.
 - A **NumPy runtime** (`runtime/somart`) — no Warp/TensorRT/CUDA needed — with single, batched and
   asynchronous generation; any ONNX Runtime execution provider; optional PyTorch backend.
 - **Animation-quality passes** measured on held-out mocap: velocity-matched joins and foot locking
   cut foot sliding by **37 %** and join pops by **40–49 %**, and improve accuracy 5 % over upstream.
 - A **real-time controller**: spring-damper locomotion, latency-compensated receding-horizon
-  planning, duration pinned to the prediction horizon (body response **0.40 s vs 1.45 s**),
-  inertialization, actions (jump, duck, dodge, sit…), stable 60 FPS on a 4-vCPU machine.
+  planning, duration pinned to the prediction horizon (body response **0.41 s vs 1.38 s**),
+  inertialization, actions (jump, duck, dodge, sit…); 0.65 ms per frame on the game thread,
+  0 dropped 60 FPS frames on a 4-vCPU machine while generating in the background.
 - **Everything configurable** in YAML (live changes, validation, per-character / per-action /
   per-skeleton, save/load), 5 hardware-aware **presets**, and a **multi-skeleton architecture** for
   future animal models (templates only — the released model is human-only).
@@ -29,17 +31,27 @@ Measured on: Intel Xeon (AVX-512 VNNI, AMX), 4 vCPU, 15.7 GB RAM, **no GPU**.
 
 | Model (CPU, ORT 1.32) | File | Peak RAM | Network p50, 4 thr / 1 thr | Accuracy vs mocap (MPJPE) | Same duration as FP32 |
 |---|---|---|---|---|---|
-| FP32 (reference) | 758 MB | 1316 MB | 65.5 / 127.9 ms | 6.96 cm | 100 % |
-| **INT8 pose transformer** (balanced) | 350 MB | 674 MB | **43.6 / 62.1 ms** | 7.08 cm | 98.9 % |
-| INT4 pose transformer (low memory) | 305 MB | 641 MB | 55.1 / 98.7 ms | 7.30 cm | 100 % |
-| INT8 everything (extreme) | 262 MB | 573 MB | 39.7 / 47.7 ms | 8.67 cm | 91.4 % |
-| Mixed FP16 (GPU choice) | 380 MB | 1209 MB | 67.1 / 128.6 ms | 6.94 cm | 100 % |
+| FP32 (reference) | 758 MB | 1316 MB | 79.4 / 149.4 ms | 6.96 cm | 100 % |
+| **INT8 pose transformer** (balanced) | 350 MB | 671 MB | **56.2 / 69.5 ms** (×1.42 / ×1.98) | 7.08 cm | 98.9 % |
+| INT4 pose transformer (low memory) | 305 MB | 644 MB | 62.5 / 115.8 ms | 7.30 cm | 100 % |
+| INT8 everything (extreme) | 262 MB | 575 MB | 48.3 / 57.0 ms | 8.67 cm | 91.4 % |
+| Mixed FP16 (GPU choice) | 380 MB | 1209 MB | 81.1 / 149.6 ms | 6.94 cm | 100 % |
+
+Latencies are drift-cancelled (all variants interleaved in one process); absolute values vary
+±20 % between runs on this shared VM, speed-ups are stable.
 
 | Animation clean-up (INT8-pose, 187 held-out windows) | MPJPE | Foot slide | Join pop start / end |
 |---|---|---|---|
 | Upstream endpoint correction | 7.08 cm | 12.5 cm/s | 3.68 / 3.72 |
 | **+ velocity matching + foot locking** | **6.69 cm** | **7.8 cm/s** | **1.89 / 2.23** |
 | Mocap ground truth | — | 5.2 cm/s | 1.15 / 1.29 |
+
+| Real-time controller (60 Hz scripted session, mean of 3 runs) | Frame p50 / p99 | Frames > 16.7 ms | Body t90 | Tracking err | Foot slide |
+|---|---|---|---|---|---|
+| balanced, async (default) | 0.65 / 2.0 ms | 0 / 1200 | 0.41 s | 0.13 m | 8.7 cm/s |
+| balanced, synchronous generation | 0.63 / 60.1 ms | 118 / 1200 | 0.41 s | 0.13 m | 8.5 cm/s |
+| balanced, model-chosen duration (upstream style) | 0.66 / 2.1 ms | 0 / 1200 | 1.38 s | 1.31 m | 8.8 cm/s |
+| balanced, no foot locking | 0.44 / 1.7 ms | 0 / 1200 | 0.41 s | 0.13 m | 15.0 cm/s |
 
 Full reports: [`benchmarks/REPORT_models.md`](benchmarks/REPORT_models.md),
 [`benchmarks/REPORT_postprocess.md`](benchmarks/REPORT_postprocess.md),

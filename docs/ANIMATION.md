@@ -8,11 +8,11 @@ in `benchmarks/` (held-out mocap comparisons, and a real-time 60 Hz gameplay scr
 
 | Technique | Where | Effect (measured) |
 |---|---|---|
-| **Duration pinned to the prediction horizon**, target placed where gameplay will be when the segment ends | `controller.py` | body reaches 90 % of a velocity change in **0.40–0.48 s** vs 1.45 s with model-chosen duration; tracking error 0.13–0.21 m vs 1.45 m (`REPORT_controller.md`) |
-| **Latency-compensated receding-horizon replanning** (every 8–16 frames + immediately on input change) | `controller.py` | 0 late results in the scripted session; inputs are acted on within one generation (~60 ms) |
-| **Asynchronous generation**, core reservation | `engine.py`, `hardware.py` | main-thread frame p50 ≈ 2.3 ms, 0–4 frames over the 16.7 ms budget per 1200-frame session (vs. ~60 ms stalls in sync mode — see report) |
+| **Duration pinned to the prediction horizon**, target placed where gameplay will be when the segment ends | `controller.py` | body reaches 90 % of a velocity change in **0.36–0.43 s** (gameplay trajectory: 0.43 s) vs 1.38 s with model-chosen duration; tracking error 0.13–0.15 m vs 1.31 m (`REPORT_controller.md`, 3 runs each) |
+| **Latency-compensated receding-horizon replanning** (every 8–16 frames + immediately on input change) | `controller.py` | ≤ 1 late result per 20 s session (hidden by inertialization); inputs are acted on within one generation (~50–70 ms) |
+| **Asynchronous generation**, core reservation | `engine.py`, `hardware.py` | main-thread frame p50 ≈ 0.65 ms, p99 ≈ 2 ms, 0 frames over the 16.7 ms budget per 1200-frame session; sync mode: p99 60 ms, 118 frames over budget |
 | **Velocity-matched joins** | `codec.velocity_matching` | join acceleration spikes −49 % / −40 % (start / end) vs upstream correction; MPJPE −5 % (`REPORT_postprocess.md`) |
-| **Foot locking** (model contacts → two-bone IK) | `postprocess.FootLocker` | foot sliding −37 % (12.5 → 7.8 cm/s; mocap 5.2) |
+| **Foot locking** (model contacts → two-bone IK) | `postprocess.FootLocker` | foot sliding −37 % on held-out windows (12.5 → 7.8 cm/s; mocap 5.2) and −42 % in the real-time session (15.0 → 8.7 cm/s); 0.22 ms per character per frame |
 | **Inertialization** of any spliced discontinuity | `postprocess.Inertializer` | hides late results / runtime overrides without cross-fade "ghosting" |
 | **Spring-damper locomotion** with accel/decel caps, inertia, momentum, turn-rate limit | `controller._simulate` | natural acceleration/deceleration curves; heavier/lighter characters via config |
 | **Target variation band** | `clips.match(variation=…)` | non-repeating choice among near-equal mocap windows |

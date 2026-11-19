@@ -32,23 +32,27 @@ MatMul is 42 % of kernel time → weight quantization of the pose transformer is
 
 | Variant | How | File | Peak RSS | Network p50 (4 thr, interleaved) | MPJPE vs mocap | Same duration as FP32 | Verdict |
 |---|---|---|---|---|---|---|---|
-| `soma_fp32` | upstream exporter | 758 MB | 1316 MB | 65.5 ms | 6.96 cm | 100 % | reference |
-| `soma_fp32_ortopt` | ORT offline graph optimization (EXTENDED) | 757 MB | 1312 MB | ≈ fp32 | 6.96 cm | 100 % | **35 % faster load** (2.0 s vs 3.1 s) → ULTRA (CPU) |
-| `soma_fp16` | upstream mixed FP16 (LayerNorm/Softmax/geometry FP32) | 380 MB | 1209 MB | 67.1 ms | 6.94 cm | 100 % | no CPU speed-up; GPU choice |
-| `soma_int8_pose` | INT8 dynamic quant, **pose transformer only** | 350 MB | 674 MB | **43.6 ms (×1.54)** | 7.08 cm | 98.9 % | **BALANCED / CPU_ONLY** |
-| `soma_int8` | INT8 dynamic quant, all network MatMul/Gemm | 262 MB | 573 MB | 39.7 ms (×1.62) | 8.67 cm | 91.4 % | EXTREME PERFORMANCE only |
-| `soma_int4_pose` | INT4 weight-only (MatMulNBits, block 32), pose transformer | 305 MB | 641 MB | 55.1 ms (×1.14) | 7.30 cm | 100 % | LOW VRAM (smallest good-quality) |
-| `soma_int4` | INT4 weight-only, all networks (Gemm→MatMul rewrite first) | 199 MB | 529 MB | 49.2 ms (×1.31) | 13.28 cm | 78.6 % | **not usable** — quality collapses |
-| torch BF16 | autocast BF16 (AMX) | (SafeTensors) | 1796 MB | ~96 ms | 7.13 cm | 97.9 % | slower than ORT FP32 on CPU at N=1 |
+| `soma_fp32` | upstream exporter | 758 MB | 1316 MB | 79.4 ms | 6.96 cm | 100 % | reference |
+| `soma_fp32_ortopt` | ORT offline graph optimization (EXTENDED) | 757 MB | 1312 MB | ≈ fp32 (×0.93–1.01) | 6.96 cm | 100 % | **27–35 % faster load** (1.8–2.0 s vs 2.5–3.1 s) → ULTRA (CPU) |
+| `soma_fp16` | upstream mixed FP16 (LayerNorm/Softmax/geometry FP32) | 380 MB | 1209 MB | 81.1 ms | 6.94 cm | 100 % | no CPU speed-up; GPU choice |
+| `soma_int8_pose` | INT8 dynamic quant, **pose transformer only** | 350 MB | 671 MB | **56.2 ms (×1.42)** | 7.08 cm | 98.9 % | **BALANCED / CPU_ONLY** |
+| `soma_int8` | INT8 dynamic quant, all network MatMul/Gemm | 262 MB | 575 MB | 48.3 ms (×1.60) | 8.67 cm | 91.4 % | EXTREME PERFORMANCE only |
+| `soma_int4_pose` | INT4 weight-only (MatMulNBits, block 32), pose transformer | 305 MB | 644 MB | 62.5 ms (×1.26) | 7.30 cm | 100 % | LOW VRAM (smallest good-quality) |
+| `soma_int4` | INT4 weight-only, all networks (Gemm→MatMul rewrite first) | 199 MB | 529 MB | 61.6 ms (×1.31) | 13.28 cm | 78.6 % | **not usable** — quality collapses |
+| torch BF16 | autocast BF16 (AMX) | (SafeTensors) | 1797 MB | 160 ms (separate process) | 7.13 cm | 97.9 % | slower than FP32 on CPU at N=1 |
 
-Single-thread speed-ups are larger (INT8 ×2.64, INT8-pose ×2.04): INT8-pose on **1 thread
-(62 ms)** is faster than FP32 on **4 threads (65 ms)** — it frees three cores for the game.
+Speed-ups were measured in two independent full runs; the second (above) gave INT8-pose ×1.42 /
+×1.59 / ×1.98 at 4 / 2 / 1 threads, the first ×1.54 / ×1.69 / ×2.04. Absolute latencies drift
+±20 % on this VM; the interleaved ratios are the reliable numbers.
+
+Single-thread speed-ups are larger (INT8 ×2.5–2.6, INT8-pose ×2.0): INT8-pose on **1 thread
+(62–70 ms)** is faster than FP32 on **4 threads (65–79 ms)** — it frees three cores for the game.
 
 ### Key findings
 
 1. **The root model and small heads are quantization-sensitive; the pose transformer is not.**
    INT8 on the pose transformer alone costs +0.12 cm MPJPE; extending INT8 to the root model
-   costs +1.7 cm and changes the chosen duration in 8.6 % of requests, for only ~9 % extra speed.
+   costs +1.6 cm and changes the chosen duration in 8.6 % of requests, for only 10–20 % extra speed.
    The root model decides the segment duration (token count) — a discrete choice that amplifies
    small numeric errors.
 2. **INT4 everywhere is not viable** (13.3 cm, 79 % duration agreement). INT4 restricted to the
@@ -56,11 +60,26 @@ Single-thread speed-ups are larger (INT8 ×2.64, INT8-pose ×2.04): INT8-pose on
    at N=1).
 3. **FP16/BF16 give no CPU speed-up at batch 1** (small matrices, cast overhead), but FP16 is
    accuracy-neutral and halves file size → the GPU model of every preset.
-4. **Batching** raises throughput: INT8-pose 44 requests/s at N=16 vs 21 req/s single (end-to-end
-   incl. codec), i.e. one network call can serve many characters.
+4. **Batching** raises throughput: INT8-pose 44–46 requests/s at N=16 vs ~21–24 req/s at N=1
+   (end-to-end incl. codec), i.e. one network call can serve many characters.
 5. **CPU-side overhead** (encode/decode/endpoint correction) was cut from ~14 ms to ~5–7 ms by
    depth-batched FK (one vectorised op per tree level), and a log/exp fractional-rotation instead
    of generic slerp.
+
+## Runtime optimizations (beyond the network)
+
+| Technique | Where | Effect |
+|---|---|---|
+| Asynchronous generation on a worker thread (ORT releases the GIL) | `SomaEngine.submit`, controller | game loop never waits for the network: frame p99 60 ms (sync) → 2 ms (async), frames over a 60 FPS budget 118 → 0 per 20 s |
+| Core reservation for the game thread | `inference.reserve_cores` | removed frame-budget overruns caused by ORT using every core (pilot: 64 → 0 frames over budget) |
+| Latency-compensated, receding-horizon streaming | controller | segments are requested ahead of need; ≤ 1 late result per 20 s session |
+| Batching many characters per network call | `SomaEngine.generate_batch` | 2× requests/s at N=16 vs N=1 |
+| Depth-batched FK (≈12 vectorised steps instead of 77 per-joint steps) | `math3d.forward_kinematics` | encode 8.3 → 1.9 ms |
+| Log-map fractional rotations instead of generic slerp | `math3d.quat_fraction` | endpoint correction 3.7 → 2.4 ms |
+| Scalar-math IK + chain-only FK in foot locking | `postprocess` | foot locking 2.2 → 0.22 ms per character per frame |
+| Cached config sections (invalidated on change) | controller | no per-frame deep copies |
+| ORT memory arena / memory pattern (pooling), spinning control | `inference.*` | tunable latency vs RAM vs CPU sharing |
+| Pre-optimized ORT graph on disk | `soma_fp32_ortopt.onnx` | session start 3.1 → 2.0 s |
 
 ## Memory
 
