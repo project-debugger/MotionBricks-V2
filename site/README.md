@@ -41,54 +41,88 @@ also tried: same download, no measurable speed gain in the browser, higher joint
 
 The settings panel (gear icon) has presets (Responsive, Balanced, Smooth), sliders for speeds,
 responsiveness, planning horizon, animation speed, smoothing, motion variety, the finger layer
-and instant steering, and toggles for foot locking, anatomical joint limits, procedural fingers,
-velocity-matched joins and head-leads-turns. Settings are kept in the browser's local storage.
+and the (off by default) body-rotation assist, and toggles for foot locking, anatomical joint
+limits, procedural fingers, velocity-matched joins, head-leads-turns, instant response and the
+body layer. Settings are kept in the browser's local storage.
 
 ## What runs per generation
 
 1. The controller predicts where the character will be at the end of the next segment, starting
-   from the root position and velocity of the frame the segment starts from, and picks a matching
-   4-frame target window from a library of 709 mocap windows (by velocity and crouch state), or an
-   action's key pose (jump, sit, dodge, ...).
+   from the root position and velocity of the frame the segment starts from. It then picks the
+   target pose from continuous mocap (every frame of the walk/jog/run/crouch/idle clips at 30 fps,
+   plus left/right mirrored copies): matching velocity, turn rate, posture, and the **stride phase**
+   the character will be in when the segment ends (from the left/right foot separation), so the
+   network continues the current stride instead of being pulled to a pose from another part of the
+   cycle. An action uses its key pose (jump, sit, dodge, ...).
 2. `codec.js` encodes 4 context + 4 target frames, the worker runs the ONNX model, then decodes
    frames and contacts, applies endpoint correction, velocity matching and the learned
    anatomical joint limits (knees and elbows as pure hinges, toe and jaw ranges).
 3. Every displayed frame then gets foot locking (two-bone IK on model contacts),
-   inertialization of any splice, the procedural finger layer and the head/chest look-ahead.
+   inertialization of any splice (on the base motion, before the procedural layers), the
+   procedural finger layer, the head/chest look-ahead and the body layer (below).
+
+## Instant response (0 s)
+
+A live generation takes 0.25 s here and longer on a phone, so the first frames of a reaction can
+never come from a request made at that moment. The playground therefore ships a **transition bank**:
+294 starts (8 directions x walk/run/sprint), stops (from 4 stride phases at each speed), turns
+(+-45/90/135/180 deg), gait changes, crouch moves and jump/dodge/duck from idle, walk and run,
+17,837 frames in total. Every bank frame is output of the same SOMA network and pipeline, generated
+ahead of time by `build/tools/gen_bank.html` from mocap contexts.
+
+When the input changes, the controller scores every bank frame against the character's current
+feet, root velocity and the path the new command asks for (motion matching), restricted to the
+right intent (stop entries for a stop, entries moving at about the current speed), and jumps there
+on the next frame with inertialization, unless the current motion already follows the new path.
+Live generation continues from inside the bank segment; results planned before the jump are
+discarded. Turns are real SOMA turning motion (lean, steps); the earlier whole-body rotation assist
+is off by default.
+
+Measured with `build/test/sim.html` (real model, scripted 21 s input, one WASM thread, 0.3-0.6 s of
+random delay added to every generation to emulate a phone; "onset" is the first visible change in
+smoothed root velocity, "reached" is when the motion follows the command):
+
+| Input | Before: motion follows the command | Now: first visible change / motion follows |
+|---|---|---|
+| Start running | 1.3 s | 0.09 s / 0.45 s |
+| 90 deg turn | 0.2 s (rotation assist) | 0.07 s / 0.39 s |
+| 180 deg reversal | 1.5 s | 0.17 s / 0.49 s |
+| Stop | 1.7 s | 0.04 s / 0.34 s |
+| Run to walk diagonally | 1.8 s | 0.07 s / 0.23 s |
+| Sprint | 0.9 s | 0.07 s / 0.58 s |
+| Stop from sprint | 1.4 s | 0.03 s / 0.47 s |
+
+No freezes or lurches; top speed 5.7-6.0 m/s (sprint 5.5); joint angular speed p99 14 rad/s and the
+displayed per-joint maxima within ~1.5x of the mocap's. Arm swing after a 90 deg turn: hand
+travel 0.48 / 0.59 m and elbow range 48-54 deg (before: 0.28 / 0.21 m, 19-20 deg; mocap running:
+0.46-0.52 m, 52 deg). Walking reaches its 1.4 m/s target (before 0.84 m/s) with even arm swing.
+
+## Body layer
+
+Procedural, in the vertex shader (the model and the mocap contain no muscle or breathing data):
+
+- **Muscles**: 24 regions (biceps, triceps, forearm flexors, deltoids, pectorals, lats, trapezius,
+  abdominals, glutes, quadriceps, hamstrings, calves, tibialis) found on the bind-pose mesh from the
+  skin weights and bone geometry; elbow and knee flexion sides come from the learned hinge axes.
+  Each bulges up to 0.4-1.2 cm along the skin normal and tilts the normals along its slope so the
+  shape catches the light. Activation follows joint angles, foot contact and effort, with ~60 ms
+  contraction and ~160 ms relaxation.
+- **Breathing**: chest and belly expansion plus a small thoracic lift; rate rises from ~13 to ~46
+  breaths per minute with exertion (which builds over seconds and recovers slowly), the abdominals
+  tighten on the exhale, and the mouth opens slightly when breathing hard.
+- **Soft tissue**: belly, glutes, chest, thighs, calves and upper arms follow a damped spring
+  driven by their bone's acceleration (footfalls, landings), up to 5 mm.
+- **Skin**: physically based material with a soft sheen at grazing angles.
 
 ## Slow devices (phones)
-
-A phone generates more slowly than a desktop, so the controller is built not to depend on speed:
 
 - **No catch-up lurches**: targets are predicted from the animation's own momentum, never from a
   free-running gameplay position, so the model is never asked to cover an impossible distance.
 - **No freezes**: if a result is late, the buffer is extended by looping the last gait cycle
   (re-rooted, seam blended) until it arrives; the late result is then inertialized in.
 - **Free worker**: while the input is steady, segments are long and replanned only when the
-  buffer runs low, so a new input usually starts generating at once.
-- **Instant turns**: direction changes rotate the buffered motion right away (up to 200 deg/s,
-  up to 90 deg); the rotation is replayed onto any result still in flight so it stays continuous.
-  Reversals over 135 deg are left to the model.
-- **Head leads**: the head and chest turn toward the new direction immediately.
+  buffer runs low.
 - The joystick switches walk/run with hysteresis, so a wobbling thumb does not flip the gait.
-
-Measured with `build/test/sim.html` (real model, scripted 21 s input sequence, extra delay added
-to every generation to emulate slower devices; Balanced, one WASM thread, ~0.26 s per generation
-here; one run each, so response times vary by about 0.3 s between runs):
-
-| Delay added | Controller | Frozen | Lurching (> 8 m/s) | Top speed | Joint speed p99 | Turn 90 deg | Start | Stop |
-|---|---|---|---|---|---|---|---|---|
-| 0 | before | 0.2 s | 0.5 s | 9.9 m/s | 28 rad/s | 0.45 s | 0.76 s | 0.58 s |
-| 0 | after | 0 | 0 | 6.0 m/s | 15 rad/s | 0.20 s | 0.78 s | 0.77 s |
-| 0.3-0.6 s (random) | before | 0.95 s | 1.8 s | 11.0 m/s | 80 rad/s | 0.99 s | 1.31 s | 1.26 s |
-| 0.3-0.6 s (random) | after | 0 | 0 | 6.0 m/s | 15 rad/s | 0.21 s | 1.31 s | 1.48 s |
-| 1.2 s | before | 3.0 s | 3.5 s | 16.5 m/s | 89 rad/s | 1.74 s | 2.77 s | 1.87 s |
-| 1.2 s | after | 0 | 0 | 6.8 m/s | 16 rad/s | 0.23 s | 2.70 s | not reached in 2 s |
-
-Starting and stopping still take about one generation plus a natural human acceleration or
-deceleration: the first new frames cannot exist before the network has produced them. Stops are
-~0.2 s slower than before because the model now brakes from the real momentum instead of being
-pulled toward an unreachable target (the cause of the lurches).
 
 ## Performance (measured here, not on phones)
 
@@ -114,6 +148,7 @@ Rebuild the generated pieces when their sources change:
 ```bash
 python3 tools/build_web_models.py       # site/models/  (needs models/soma/optimized/onnx/)
 python3 tools/export_web_data.py        # site/data/    (needs third_party/ sample clips)
+node site/build/tools/gen_bank.cjs 8124 # site/data/bank.* (with `node site/build/serve.mjs 8124 --isolate`)
 python3 site/build/make_index.py        # site/index.html from index.src.html
 ```
 
@@ -130,7 +165,7 @@ Notes before enabling it:
 
 - GitHub Pages for a private repository needs a paid plan (Pro, Team or Enterprise), and the
   published site is public unless the organization uses Enterprise Cloud private Pages.
-- `site/data/windows.*` is derived from the MotionBricks sample clips, which are under the
+- `site/data/windows.*`, `clips.*` and `bank.*` are derived from the MotionBricks sample clips, which are under the
   NVIDIA Sample Data Evaluation License (internal evaluation and testing). Publishing a public
   site redistributes that derived data. Check that license, or replace the windows with motion
   you have the rights to (`tools/export_web_data.py` builds them from any SOMA BVH clips),
@@ -152,19 +187,23 @@ there, so it runs single-threaded.
 ```
 index.src.html          page source (HUD, controls, panel); make_index.py -> index.html
 js/main.js              scene, input, settings panel, frame loop
-js/controller.js        motion library, planning, splicing, steering, gait-cycle extension,
+js/controller.js        planning, splicing, instant transitions, gait-cycle extension,
                         inertialization, foot locking, fingers, head look-ahead
+js/library.js           continuous mocap clips with stride phase (target selection)
+js/bank.js              transition bank + motion-matching features
+js/body.js              muscles, breathing, soft tissue (vertex shader)
 js/settings.js          presets and defaults
 js/codec.js             SOMA encode/decode, endpoint correction, velocity matching, joint limits
 js/math3d.js            quaternion and pose helpers
 js/worker.js            model download and cache, onnxruntime-web inference
-data/                   skeleton, motion windows, joint limits, SOMA body mesh
+data/                   skeleton, action windows, clips (30 fps + mirrored), transition bank,
+                        joint limits, SOMA body mesh
 models/                 models.json + model parts (14 x 14 MB)
 vendor/                 onnxruntime-web 1.31.1, three.js 0.170.0 (MIT, unmodified)
 coi-serviceworker.js    COOP/COEP shim for static hosts (MIT)
 build/                  dev server, index builder, artifact stager, parity and timing tests
                         (test/sim.html + run_sim.cjs; controller_baseline.js is the pre-fix
-                        controller for comparison) - not deployed
+                        controller for comparison), bank generator (tools/gen_bank.*) - not deployed
 ```
 
 ## Licences and attribution
@@ -174,6 +213,7 @@ build/                  dev server, index builder, artifact stager, parity and t
   `models/` holds an INT8-quantized derivative of it (int8/FP16 weight storage).
 - SOMA body mesh (`data/soma_mesh.*`): extracted from the upstream MotionBricks asset
   `soma_base_skel_minimal_no_root.usd`, NVIDIA, CC BY 4.0 (upstream assets licence).
-- Motion windows (`data/windows.*`): derived from MotionBricks sample clips, NVIDIA Sample Data
-  Evaluation License.
+- Motion windows and clips (`data/windows.*`, `data/clips.*`, mirrored copies included): derived
+  from MotionBricks sample clips, NVIDIA Sample Data Evaluation License.
+- Transition bank (`data/bank.*`): SOMA model output conditioned on 4-frame windows of those clips.
 - onnxruntime-web (Microsoft), three.js, coi-serviceworker: MIT, licence files in `vendor/`.

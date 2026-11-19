@@ -2,6 +2,8 @@
 // Generation is asynchronous (Web Worker); the playhead never waits for the network.
 import * as M from './math3d.js';
 import { applyLimits, headingFromHips, validFrames, MIN_TOKENS, MAX_TOKENS } from './codec.js';
+import { legIndices, legState, footSep, upCrossings } from './library.js';
+import { rawFeatures } from './bank.js';
 
 const FPS = 30, DT = 1 / 30, LN2 = Math.log(2);
 
@@ -222,7 +224,7 @@ class LookAt {
     this.heading = this.heading === null ? h : this.heading + M.wrap(h - this.heading) * (1 - Math.exp(-dt / 0.18));
     const moving = Math.hypot(goal[0], goal[2]) > 0.5, lim = maxDeg * Math.PI / 180;
     const want = moving ? Math.max(-lim, Math.min(lim, M.wrap(Math.atan2(goal[0], goal[2]) - this.heading))) : 0;
-    [this.x, this.v] = damperDecay(this.x - want, this.v, 0.09, dt); this.x += want;
+    [this.x, this.v] = damperDecay(this.x - want, this.v, 0.16, dt); this.x += want;
     if (Math.abs(this.x) < 1e-3) return local;
     const out = new Float64Array(local);
     let pw = M.Q(w, this.sk.parents[this.chain[0][0]]);
@@ -253,18 +255,19 @@ const warpAngle = (w, abs) => (abs <= w.startAbs ? 0 : w.sign * Math.min(w.total
 const LEG_ARM = ['LeftLeg', 'LeftShin', 'LeftFoot', 'RightLeg', 'RightShin', 'RightFoot', 'LeftArm', 'LeftForeArm', 'RightArm', 'RightForeArm', 'Spine1', 'Spine2'];
 
 export class Controller {
-  constructor({ sk, lib, limits, settings, generate, actions }) {
-    this.sk = sk; this.lib = lib; this.limits = limits; this.S = settings; this.generate = generate; this.actions = actions;
+  constructor({ sk, lib, clips = null, bank = null, limits, settings, generate, actions }) {
+    this.sk = sk; this.lib = lib; this.clips = clips; this.bank = bank; this.bankGoal = [0, 0, 0]; this.bankCrouch = false; this.lastJumpMs = -1e9; this.limits = limits; this.S = settings; this.generate = generate; this.actions = actions;
+    this.legs = legIndices(sk); this.legCache = new WeakMap();
     this.rand = M.rng(7);
     this.simPos = [0, 0, 0]; this.simVel = [0, 0, 0]; this.simAcc = [0, 0, 0]; this.simYaw = 0;
     const idle = place(lib.windows[actions.idle.window], this.simPos, 0).map((f) => applyLimits(limits, f, true));
     this.buffer = [...idle, ...Array.from({ length: 8 }, () => new Float64Array(idle[3]))];
     this.contacts = this.buffer.map(() => [1, 1, 1, 1]);
     this.time = 3 * DT; this.pending = false; this.framesSincePlan = 1e6; this.lastGoal = [0, 0, 0];
-    this.queue = []; this.commitEnd = -1; this.latency = 0.3; this.latHist = [];
+    this.queue = []; this.commitEnd = -1; this.latency = 0.3; this.latHist = []; this.epoch = 0;
     this.base = 0; // frames dropped from the front of the buffer so far (absolute index = base + local index)
     this.warps = []; this.warpSeq = 0; this.planYaw = null; this.warpSincePlan = 0; this.sinceChange = 1e6;
-    this.stats = { generations: 0, late: 0, lastLatency: 0, lastTokens: 0, failures: 0, error: '', extended: 0, steering: 0 };
+    this.stats = { generations: 0, late: 0, lastLatency: 0, lastTokens: 0, failures: 0, error: '', extended: 0, steering: 0, discarded: 0, instant: 0 };
     this.inert = new Inertializer(sk.names.length, 0.07);
     this.feet = new FootLocker(sk, () => ({ on: 0.55, off: 0.35, max: 0.12, blendIn: 0.06, blendOut: 0.1 }));
     this.fingers = new FingerAnimator(sk, this.buffer[0], () => ({ curlIdle: 6, curlWalk: 12, curlRun: this.S().fingerCurlRun,
@@ -289,8 +292,8 @@ export class Controller {
     if (M.vdot(goal, state.v) < 0) goal = M.vadd(goal, M.vscale(state.v, s.momentum));
     let [vn, an] = springVelocity(state.v, state.a, goal, hl, dt);
     let dv = M.vsub(vn, state.v);
-    const cap = (M.vlen(vn) > M.vlen(state.v) ? s.acceleration : s.deceleration) * dt;
-    if (M.vlen(dv) > cap) { dv = M.vscale(dv, cap / M.vlen(dv)); an = M.vscale(dv, 1 / Math.max(dt, 1e-6)); }
+    const cap = Math.max(0, (M.vlen(vn) > M.vlen(state.v) ? s.acceleration : s.deceleration) * dt), dl = M.vlen(dv);
+    if (dl > cap && dl > 1e-9) { dv = M.vscale(dv, cap / dl); an = M.vscale(dv, 1 / Math.max(dt, 1e-6)); }
     state.v = M.vadd(state.v, dv); state.a = an; state.p = M.vadd(state.p, M.vscale(state.v, dt));
   }
   simulate(goal, dt) { // smoothed command velocity (HUD, fingers, replan trigger)
@@ -323,21 +326,96 @@ export class Controller {
     this.latency = Math.max(0.7 * this.latency + 0.3 * lat, srt[Math.floor(srt.length / 2)]); // late results are inertialized, not frozen
   }
 
-  plan(cmd, goal) {
+  // gait phase at buffer frame k from the up-crossings of the left-right foot separation
+  phaseAt(k) {
+    const a = Math.max(0, k - 70), d = [];
+    for (let i = a; i <= k; i++) {
+      const f = this.buffer[i];
+      let st = this.legCache.get(f);
+      if (!st) { st = legState(f, this.legs); this.legCache.set(f, st); }
+      d.push(footSep(st));
+    }
+    const ups = upCrossings(d), n = ups.length;
+    if (n < 2) return null;
+    const period = ups[n - 1] - ups[n - 2], since = (k - a) - ups[n - 1];
+    if (period < 12 || period > 60 || since > 1.5 * period) return null;
+    return { phase: (since / period) % 1, period };
+  }
+
+  legAt(i) {
+    const f = this.buffer[Math.max(0, Math.min(this.buffer.length - 1, i))];
+    let st = this.legCache.get(f);
+    if (!st) { st = legState(f, this.legs); this.legCache.set(f, st); }
+    return st;
+  }
+  // desired path over the next second: spring from the current root velocity toward the command
+  desiredPath(i0, goal) {
+    const r = this.rootState(i0), st = { p: r.p, v: r.v, a: [0, 0, 0] }, pos = [], yaw = [];
+    let y = this.legAt(i0).yaw;
+    for (let n = 1; n <= 30; n++) {
+      this.step(st, goal, DT);
+      if (Math.hypot(st.v[0], st.v[2]) > 0.3) y = Math.atan2(st.v[0], st.v[2]);
+      if (n % 10 === 0) { pos.push([st.p[0], st.p[2]]); yaw.push(y); }
+    }
+    return { pos, yaw };
+  }
+  queryRaw(i0, path) { return rawFeatures(this.legAt(i0 - 1), this.legAt(i0), this.legAt(i0 + 1), path.pos, path.yaw); }
+  // 0-latency response: jump into the closest pre-generated SOMA transition; live generation continues from it
+  instant(cmd, goal) {
+    const i0 = Math.floor(this.frame);
+    this.stats.instantWhy = 'buffer'; this.stats.lastInstantCost = null;
+    if (i0 < 2 || i0 + 1 >= this.buffer.length) return false;
+    const q = this.bank.weigh(this.queryRaw(i0, this.desiredPath(i0, goal)));
+    const rs = this.rootState(i0), speedNow = Math.hypot(rs.v[0], rs.v[2]);
+    const m = this.bank.match(q, { crouch: cmd.gait === 'crouch', action: cmd.action || null, speed: speedNow, stopping: M.vlen(goal) < 0.5, gait: cmd.gait });
+    this.stats.instantWhy = 'nomatch';
+    if (!m) return false;
+    this.stats.instantWhy = 'kept';
+    if (!cmd.action && i0 + 31 < this.buffer.length) { // keep the current future if it already follows the new path
+      const fut = [10, 20, 30].map((h) => this.legAt(i0 + h));
+      const cur = this.bank.weigh(this.queryRaw(i0, { pos: fut.map((x) => x.g), yaw: fut.map((x) => x.yaw) }));
+      let c = 0; for (let d = 0; d < 12; d++) c += (cur[d] - q[d]) ** 2;
+      const pc = this.bank.costPath(q, m.ci);
+      this.stats.lastInstantCost = [+c.toFixed(2), +pc.toFixed(2), +m.cost.toFixed(2)];
+      if (c <= Math.max(0.15, pc + 0.15)) return false; // current future already follows the new path as well
+    }
+    this.stats.instantWhy = 'jump';
+    this.jump(m.ci);
+    return true;
+  }
+  jump(ci) {
+    const cnd = this.bank.cand[ci], e = this.bank.entries[cnd.ei], f0 = cnd.f, i0 = Math.floor(this.frame);
+    const cur = this.legAt(i0), src = e.states[f0], dy = M.wrap(cur.yaw - src.yaw), qy = M.qYaw(dy);
+    const frames = [], contacts = [];
+    for (let f = f0 - 1; f < e.F; f++) { // from the frame before the match point, so velocities stay continuous
+      const p = this.bank.pose(cnd.ei, f), r = M.P(p, 0), d = M.qrot(qy, [r[0] - src.g[0], 0, r[2] - src.g[1]]);
+      M.setP(p, 0, [cur.g[0] + d[0], r[1], cur.g[1] + d[2]]);
+      M.setQ(p, 0, M.qnorm(M.qmul(qy, M.Q(p, 0))));
+      frames.push(p); contacts.push(this.bank.contacts(cnd.ei, f));
+    }
+    const before = this.display;
+    this.buffer = [...this.buffer.slice(0, i0 - 1), ...frames];
+    this.contacts = [...this.contacts.slice(0, i0 - 1), ...contacts];
+    if (before) this.inert.transition(this.baseOut || before, this.basePrev || this.baseOut || before, this.sample(this.time), this.sample(this.time - DT), DT);
+    this.epoch++; this.warps = []; this.planYaw = null; this.warpSincePlan = 0;
+    this.framesSincePlan = 1e6; this.sinceChange = 0; this.queue = [];
+    this.commitEnd = e.action ? (i0 - 1) + frames.length - 1 - (this.latency * FPS + this.S().replanLead + 2) : -1;
+    this.stats.instant++;
+    this.stats.lastInstant = `${e.from}->${e.action || e.gait}${e.dir === null ? '' : '@' + e.dir} f${f0}`;
+  }
+
+  // request for a segment that starts at buffer frame k (used live and by the offline transition bank)
+  buildRequest(cmd, goal, k, { action = null, forceT = null } = {}) {
     const s = this.S(), now = this.frame;
-    const lead = Math.ceil(this.latency * FPS) + s.replanLead;
-    let k = Math.floor(now) + Math.max(1, lead);
-    k = Math.min(Math.max(k, 3), this.buffer.length - 1);
-    if (!this.queue.length) this.presteer(goal, k);
     const context = this.buffer.slice(k - 3, k + 1);
     let allowed = []; for (let t = s.minTokens; t <= s.maxTokens; t++) allowed.push(t);
     // the segment must outlast the measured latency; steady input gets long segments (worker stays free)
     const needT = Math.ceil((this.latency * FPS * 1.3 + s.replanLead + 6) / 4);
     const steady = this.sinceChange > 0.6 && !this.queue.length;
     const Th = steady ? MAX_TOKENS : Math.round((s.predictionHorizon * FPS - (k - now) + 7) / 4);
-    const T = Math.min(MAX_TOKENS, Math.max(s.minTokens, MIN_TOKENS, needT, Th));
+    const T = forceT ?? Math.min(MAX_TOKENS, Math.max(s.minTokens, MIN_TOKENS, needT, Th));
     const horizon = (validFrames(T) - 1) / FPS;
-    let target, action = this.queue.shift() || null;
+    let target;
     const a = action ? this.actions[action] : null;
     if (a) {
       const win = this.lib.windows[a.window];
@@ -351,19 +429,43 @@ export class Controller {
       } else {
         const [fp, , fyaw] = this.predictFrom(k, goal, horizon);
         target = place(win, fp, fyaw);
-        if (action === 'sit') this.events.push({ type: 'sit', pos: fp, yaw: fyaw, seat: Math.max(0.3, M.P(target[0], 0)[1] - 0.12) });
+        if (action === 'sit' && forceT === null) this.events.push({ type: 'sit', pos: fp, yaw: fyaw, seat: Math.max(0.3, M.P(target[0], 0)[1] - 0.12) });
       }
-      allowed = allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
+      allowed = forceT ? [forceT] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
       if (!allowed.length) allowed = [MAX_TOKENS];
     } else {
       const [fp, fv, fyaw] = this.predictFrom(k, goal, horizon);
       const fwd = [Math.sin(fyaw), Math.cos(fyaw)], right = [fwd[1], -fwd[0]];
       const vl = [fv[0] * right[0] + fv[2] * right[1], fv[0] * fwd[0] + fv[2] * fwd[1]];
-      const w = this.lib.match(vl, 0, cmd.gait === 'crouch', s.variation, this.rand);
-      target = place(this.lib.windows[w], fp, fyaw);
-      allowed = s.durationMode === 'horizon' ? [T] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
+      const crouch = cmd.gait === 'crouch', sp = Math.hypot(vl[0], vl[1]);
+      if (this.clips) { // phase-aware: continue the stride the character is in
+        let phase = null;
+        const ph = sp > 0.5 ? this.phaseAt(k) : null;
+        if (ph) {
+          const P = 0.5 * (ph.period + (this.clips.periodFor(sp, crouch) ?? ph.period));
+          phase = ((ph.phase + (validFrames(T) - 4) / P) % 1 + 1) % 1;
+        }
+        const wi = this.clips.match({ v: vl, yr: 0, crouch, phase, variation: s.variation, rand: this.rand, moving: sp > 0.5 });
+        target = place(this.clips.window(wi), fp, fyaw);
+        this.stats.lastTarget = { clip: this.clips.clips[this.clips.cand[wi].ci].name, f: this.clips.cand[wi].f, phase, wphase: this.clips.cand[wi].phase };
+      } else {
+        const w = this.lib.match(vl, 0, crouch, s.variation, this.rand);
+        target = place(this.lib.windows[w], fp, fyaw);
+      }
+      allowed = forceT ? [forceT] : s.durationMode === 'horizon' ? [T] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
     }
-    const info = { kAbs: this.base + k, t0: performance.now(), action, warpSeq: this.warpSeq };
+    return { context, target, allowed, a };
+  }
+
+  plan(cmd, goal) {
+    const s = this.S(), now = this.frame;
+    const lead = Math.ceil(this.latency * FPS) + s.replanLead;
+    let k = Math.floor(now) + Math.max(1, lead);
+    k = Math.min(Math.max(k, 3), this.buffer.length - 1);
+    if (!this.queue.length) this.presteer(goal, k);
+    const action = this.queue.shift() || null;
+    const { context, target, allowed, a } = this.buildRequest(cmd, goal, k, { action });
+    const info = { kAbs: this.base + k, t0: performance.now(), action, warpSeq: this.warpSeq, epoch: this.epoch };
     this.pending = true;
     this.framesSincePlan = 0; this.lastGoal = goal.slice();
     this.planYaw = Math.hypot(goal[0], goal[2]) > 0.5 && !a ? Math.atan2(goal[0], goal[2]) : null; this.warpSincePlan = 0;
@@ -377,10 +479,16 @@ export class Controller {
     const lat = (performance.now() - info.t0) / 1000;
     this.noteLatency(lat);
     Object.assign(this.stats, { generations: this.stats.generations + 1, lastLatency: lat, lastTokens: res.tokens });
+    if (info.epoch !== this.epoch) { this.stats.discarded++; return; } // planned before an instant transition replaced the future
     const k = info.kAbs - this.base, now = this.frame, before = this.display;
     if (k < 3 || k > this.buffer.length) return; // stale (cannot happen with one request in flight)
     let frames = res.frames;
     for (const w of this.warps) if (w.seq > info.warpSeq) frames = frames.map((f, i) => { const a = warpAngle(w, info.kAbs + i); return a ? rotateFrame(f, w.pivot, a) : f; });
+    if (k < this.buffer.length) { // seam mismatch between the frame being replaced and the new first frame (diagnostics)
+      let worst = 0, wj = -1; const o = this.buffer[k], n = frames[0];
+      for (let j = 1; j < this.sk.names.length; j++) { const a = M.vlen(M.qToScaledAxis(M.qmul(M.Q(o, j), M.qconj(M.Q(n, j))))); if (a > worst) { worst = a; wj = j; } }
+      (this.stats.seams ||= []).push([+(worst * 57.3).toFixed(1), this.sk.names[wj]]); if (this.stats.seams.length > 60) this.stats.seams.shift();
+    }
     this.buffer = [...this.buffer.slice(0, k), ...frames];
     this.contacts = [...this.contacts.slice(0, k), ...res.contacts];
     const drop = Math.max(0, Math.floor(now) - 8);
@@ -389,7 +497,7 @@ export class Controller {
     if (info.action) this.commitEnd = (k - drop) + res.frames.length - 1 - (this.latency * FPS + this.S().replanLead + 2);
     if (this.frame > k - drop && before) {
       this.stats.late++;
-      this.inert.transition(before, this.prevDisplay || before, this.sample(this.time), this.sample(this.time - DT), DT);
+      this.inert.transition(this.baseOut || before, this.basePrev || this.baseOut || before, this.sample(this.time), this.sample(this.time - DT), DT);
     }
   }
   // append a copy of the last gait cycle (re-rooted, seam blended) so playback never stalls on a late result
@@ -464,8 +572,23 @@ export class Controller {
 
   update(cmd, dt) {
     const s = this.S();
-    if (cmd.action) this.trigger(cmd.action);
+    dt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0, dt)) : 0; // a first frame can report a slightly negative step
     const goal = this.goalVelocity(cmd);
+    let actionDone = false;
+    if (this.bank && s.instant !== false && this.frame >= this.commitEnd) {
+      const moving = M.vlen(goal) > 0.5, was = M.vlen(this.bankGoal) > 0.5, crouch = cmd.gait === 'crouch';
+      const ang = moving && was ? Math.abs(M.wrap(Math.atan2(goal[0], goal[2]) - Math.atan2(this.bankGoal[0], this.bankGoal[2]))) : 0;
+      const event = cmd.action ? this.bank.actions.has(cmd.action)
+        : moving !== was || ang > 0.5 || Math.abs(M.vlen(goal) - M.vlen(this.bankGoal)) > 1.0 || crouch !== this.bankCrouch;
+      if (event && performance.now() - this.lastJumpMs > 120) {
+        if (!cmd.action) { this.bankGoal = goal.slice(); this.bankCrouch = crouch; }
+        const took = this.instant(cmd, goal);
+        if (took) { this.lastJumpMs = performance.now(); actionDone = !!cmd.action; }
+        (this.stats.instantLog ||= []).push({ t: +(this.base + this.frame).toFixed(0), took, why: this.stats.instantWhy, cost: this.stats.lastInstantCost, entry: took ? this.stats.lastInstant : null });
+        if (this.stats.instantLog.length > 50) this.stats.instantLog.shift();
+      }
+    }
+    if (cmd.action && !actionDone) this.trigger(cmd.action);
     this.simulate(goal, dt);
     const changed = M.vlen(M.vsub(goal, this.lastGoal)) > s.inputReplanThreshold;
     this.sinceChange = changed ? 0 : this.sinceChange + dt;
@@ -481,12 +604,18 @@ export class Controller {
     this.time = Math.min(this.time + dt * s.playbackRate, (this.buffer.length - 1) * DT);
     this.framesSincePlan += dt * FPS; // game frames, independent of the render rate
     let pose = this.sample(this.time);
+    const stages = this.debugStages ? { sample: pose } : null;
     this.simPos = M.P(pose, 0);
     if (this.inert.active) pose = this.inert.apply(pose, dt);
+    this.basePrev = this.baseOut; this.baseOut = pose; // motion stream before IK and procedural layers (what transitions blend)
+    if (stages) stages.inert = pose;
     if (s.footLocking) pose = this.feet.apply(pose, this.sampleContacts(this.time), dt);
+    if (stages) stages.feet = pose;
     if (s.anatomical) pose = applyLimits(this.limits, pose);
+    if (stages) stages.limits = pose;
     if (s.fingers) pose = this.fingers.apply(pose, Math.hypot(this.simVel[0], this.simVel[2]), dt);
-    if (s.lookAt ?? true) pose = this.look.apply(pose, goal, dt, 70);
+    if (s.lookAt ?? true) pose = this.look.apply(pose, goal, dt, 45);
+    if (stages) { stages.final = pose; this.lastStages = stages; }
     if (s.smoothing > 0 && this.display) {
       const alpha = 1 - Math.pow(s.smoothing, dt * 30), out = new Float64Array(pose);
       for (let j = 1; j < this.sk.names.length; j++) M.setQ(out, j, M.qSlerp(M.Q(this.display, j), M.Q(pose, j), alpha));

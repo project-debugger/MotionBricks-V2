@@ -1,0 +1,130 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SOMA transition bank generator</title>
+<!-- Generates site/data/bank.bin/json with the live pipeline (controller target selection, worker, SOMA model).
+     Run with build/tools/gen_bank.cjs. Every bank frame is SOMA output; contexts are 4-frame mocap windows. -->
+<script type="module">
+import * as M from '../../js/math3d.js';
+import { bindLimits, JOINT_NAMES } from '../../js/codec.js';
+import { DEFAULTS } from '../../js/settings.js';
+import { Controller, Library } from '../../js/controller.js';
+import { ClipLibrary, legState } from '../../js/library.js';
+
+const q = new URLSearchParams(location.search), modelKey = q.get('model') || 'balanced', limit = +(q.get('limit') || 0);
+const BASE = new URL('../../', location.href).href;
+const getJSON = async (p) => (await fetch(BASE + p)).json(), getBin = async (p) => (await fetch(BASE + p)).arrayBuffer();
+const log = (m) => { (window.LOG ||= []).push(m); };
+try {
+  const [skel, lim, wmeta, wbin, cmeta, cbin, models] = await Promise.all([getJSON('data/skeleton.json'), getJSON('data/joint_limits.json'),
+    getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('models/models.json')]);
+  const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
+  const limits = bindLimits(lim, sk), lib = new Library(sk, wmeta, wbin), clips = new ClipLibrary(sk, cmeta, cbin, limits), J = sk.names.length;
+  const S = { ...DEFAULTS, variation: 0 };
+  const worker = new Worker(new URL('../../js/worker.js', import.meta.url), { type: 'module' });
+  let nextId = 1; const waiting = new Map(); let readyResolve; const ready = new Promise((r) => { readyResolve = r; });
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === 'ready') readyResolve(m);
+    else if (m.type === 'result') {
+      const w = waiting.get(m.id); waiting.delete(m.id);
+      const frames = [], contacts = [];
+      for (let i = 0; i < m.count; i++) { frames.push(m.frames.slice(i * J * 7, (i + 1) * J * 7)); contacts.push(Array.from(m.contacts.slice(i * 4, i * 4 + 4))); }
+      w.resolve({ frames, contacts });
+    } else if (m.type === 'error') { if (waiting.has(m.id)) { waiting.get(m.id).reject(new Error(m.error)); waiting.delete(m.id); } else log('error ' + m.error); }
+  };
+  worker.postMessage({ type: 'load', base: BASE + 'models/', model: modelKey, info: models.models[modelKey], skeleton: sk, jointLimits: lim, threads: 4 });
+  await ready;
+  const run = (req) => new Promise((resolve, reject) => { const id = nextId++; waiting.set(id, { resolve, reject }); worker.postMessage({ type: 'generate', id, ...req, anatomical: true, velocityMatching: true }); });
+
+  // ---- contexts: mocap history ending at a 4-frame window, canonicalised (last frame at the origin facing +Z)
+  const L = clips.L;
+  function history(cand) {
+    const e = clips.cand[cand], a = Math.max(0, e.f - 45), frames = [];
+    for (let n = a; n <= e.f + 3; n++) frames.push(clips.frame(e.ci, n));
+    const st = legState(frames[frames.length - 1], L), inv = M.qYaw(-st.yaw);
+    return frames.map((p) => {
+      const r = M.P(p, 0), d = M.qrot(inv, [r[0] - st.g[0], 0, r[2] - st.g[1]]), out = new Float64Array(p);
+      M.setP(out, 0, [d[0], r[1], d[2]]); M.setQ(out, 0, M.qnorm(M.qmul(inv, M.Q(p, 0)))); return out;
+    });
+  }
+  const pick = (pred, phases) => {
+    const pool = clips.cand.map((e, i) => [e, i]).filter(([e]) => pred(e));
+    if (!phases) { // spread over clips
+      const byClip = new Map(); for (const [e, i] of pool) if (!byClip.has(e.ci)) byClip.set(e.ci, i);
+      return [...byClip.values()];
+    }
+    return phases.map((ph) => { let best = null, bc = Infinity; for (const [e, i] of pool) { if (e.phase === null) continue; const d = Math.abs(((e.phase - ph) % 1 + 1.5) % 1 - 0.5); if (d < bc) { bc = d; best = i; } } return best; }).filter((i) => i !== null);
+  };
+  const P4 = [0, 0.25, 0.5, 0.75];
+  const ctx = {
+    idle: pick((e) => e.cat === 'idle' && !e.crouch && e.speed < 0.12).slice(0, 3),
+    crouch_idle: pick((e) => e.cat === 'idle' && e.crouch && e.speed < 0.12).slice(0, 2),
+    walk: pick((e) => !e.crouch && Math.abs(e.speed - S.walkSpeed) < 0.25 && Math.abs(e.yr) < 0.3 && e.v[1] > 0.9 * e.speed, P4),
+    run: pick((e) => !e.crouch && Math.abs(e.speed - S.runSpeed) < 0.45 && Math.abs(e.yr) < 0.5 && e.v[1] > 0.9 * e.speed, P4),
+    sprint: pick((e) => !e.crouch && e.speed > 4.5 && Math.abs(e.yr) < 0.7 && e.v[1] > 0.85 * e.speed, P4),
+    crouch: pick((e) => e.crouch && Math.abs(e.speed - S.crouchSpeed) < 0.35 && Math.abs(e.yr) < 0.4 && e.v[1] > 0.85 * e.speed, P4),
+  };
+  log('contexts ' + JSON.stringify(Object.fromEntries(Object.entries(ctx).map(([k, v]) => [k, v.length]))));
+  const speed = { walk: S.walkSpeed, run: S.runSpeed, sprint: S.sprintSpeed, crouch: S.crouchSpeed };
+  const D8 = [0, 45, -45, 90, -90, 135, -135, 180], D7 = D8.slice(1);
+  const plans = []; // [context kind, cand, outcome]
+  const add = (kind, outs) => { for (const c of ctx[kind]) for (const o of outs) plans.push([kind, c, o]); };
+  const mv = (gait, dirs) => dirs.map((d) => ({ gait, dir: d }));
+  add('idle', [...mv('walk', D8), ...mv('run', D8), ...mv('sprint', D8), { gait: 'crouch', dir: null }, ...['jump', 'dodge', 'duck'].map((a) => ({ action: a, then: { gait: 'run', dir: null } }))]);
+  add('crouch_idle', [...mv('crouch', D8), { gait: 'run', dir: null }]);
+  add('walk', [{ gait: 'walk', dir: null }, ...mv('walk', D7), ...mv('run', [0, 45, -45, 90, -90]), ...mv('sprint', [0]), ...['jump', 'dodge', 'duck'].map((a) => ({ action: a, then: { gait: 'walk', dir: 0 } }))]);
+  add('run', [{ gait: 'run', dir: null }, ...mv('run', D7), ...mv('walk', [0]), ...mv('sprint', [0, 45, -45]), ...['jump', 'dodge', 'duck'].map((a) => ({ action: a, then: { gait: 'run', dir: 0 } }))]);
+  add('sprint', [{ gait: 'sprint', dir: null }, ...mv('sprint', [45, -45, 90, -90, 180]), ...mv('run', [0]), { action: 'jump', then: { gait: 'sprint', dir: 0 } }]);
+  add('crouch', [{ gait: 'crouch', dir: null }, ...mv('crouch', D7)]);
+  const todo = limit ? plans.slice(0, limit) : plans;
+  log(`planned ${todo.length} transitions`);
+
+  const goalOf = (o) => (o.dir === null || o.dir === undefined ? [0, 0, 0] : [Math.sin(o.dir * Math.PI / 180) * speed[o.gait], 0, Math.cos(o.dir * Math.PI / 180) * speed[o.gait]]);
+  const mk = (buf) => {
+    const c = new Controller({ sk, lib, clips, limits, settings: () => S, generate: null, actions: wmeta.actions });
+    c.buffer = buf; c.contacts = buf.map(() => [1, 1, 1, 1]); c.time = (buf.length - 1) / 30; c.sinceChange = 0; c.latency = 0.3;
+    return c;
+  };
+  async function segment(buf, cmd, goal, action, forceT) {
+    const c = mk(buf);
+    const req = c.buildRequest(cmd, goal, buf.length - 1, { action, forceT });
+    const res = await run({ context: req.context, target: req.target, allowed: req.allowed });
+    return res;
+  }
+  const entries = [], blobs = []; let off = 0, t0 = performance.now();
+  const jm = JOINT_NAMES.map((n) => sk.names.indexOf(n));
+  for (const [kind, cand, o] of todo) {
+    const hist = history(cand);
+    let frames, contacts;
+    if (o.action) {
+      const r1 = await segment(hist, { gait: o.then.gait, move: [0, 0] }, goalOf(o.then), o.action, null);
+      const h2 = [...hist.slice(0, -1), ...r1.frames];
+      const r2 = await segment(h2, { gait: o.then.gait, move: [0, 0] }, goalOf(o.then), null, 12);
+      frames = [...r1.frames, ...r2.frames.slice(1)]; contacts = [...r1.contacts, ...r2.contacts.slice(1)];
+    } else {
+      const g = o.dir === null ? (kind === 'idle' && o.gait === 'crouch' ? 'crouch' : o.gait) : o.gait;
+      const r = await segment(hist, { gait: g, move: [0, 0] }, goalOf(o), null, 16);
+      frames = r.frames; contacts = r.contacts;
+    }
+    const F = frames.length, root = new Float32Array(F * 3), qi = new Int16Array(F * jm.length * 4), ct = new Uint8Array(F * 4);
+    frames.forEach((p, f) => {
+      root.set([p[0], p[1], p[2]], f * 3);
+      jm.forEach((j, k) => { let qq = M.Q(p, j); if (qq[3] < 0) qq = qq.map((x) => -x); for (let c = 0; c < 4; c++) qi[(f * jm.length + k) * 4 + c] = Math.round(qq[c] * 32767); });
+      contacts[f].forEach((c, n) => { ct[f * 4 + n] = Math.round(Math.min(1, Math.max(0, c)) * 255); });
+    });
+    const blob = new Uint8Array(root.byteLength + qi.byteLength + ct.byteLength);
+    blob.set(new Uint8Array(root.buffer), 0); blob.set(new Uint8Array(qi.buffer), root.byteLength); blob.set(ct, root.byteLength + qi.byteLength);
+    entries.push({ from: kind, gait: o.action ? o.then.gait : (o.dir === null ? (o.gait === 'crouch' ? 'crouch_stop' : 'stop') : o.gait), dir: o.dir ?? null,
+      action: o.action || null, frames: F, offset: off });
+    blobs.push(blob); off += blob.length;
+    if (entries.length % 20 === 0) log(`${entries.length}/${todo.length} in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
+  }
+  const all = new Uint8Array(off); let o2 = 0; for (const b of blobs) { all.set(b, o2); o2 += b.length; }
+  let bin = ''; for (let i = 0; i < all.length; i += 0x8000) bin += String.fromCharCode.apply(null, all.subarray(i, i + 0x8000));
+  window.RESULT = { meta: { fps: 30, joints: JOINT_NAMES, model: modelKey, entries,
+    layout: 'per entry: float32 root[F,3], int16 quat[F,Jm,4] (/32767), uint8 contacts[F,4] (/255); other joints: relaxed pose',
+    note: 'Every frame is output of the SOMA network (same pipeline as the live playground); contexts are 4-frame mocap windows',
+    license: 'Model output conditioned on NVIDIA MotionBricks sample clips (NVIDIA Sample Data Evaluation License)' },
+    b64: btoa(bin), seconds: (performance.now() - t0) / 1000 };
+} catch (e) { window.RESULT = { error: String(e && e.stack || e) }; }
+</script>

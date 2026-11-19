@@ -4,6 +4,7 @@
   skeleton.json        77-joint SOMA rig (names, parents, reference local transforms)
   windows.bin/.json    canonical 4-frame target windows for locomotion matching + action key poses
                        (root position float32, quaternions int16-normalised: 2.5 KB per window)
+  clips.bin/.json      continuous 30 fps locomotion/idle clips + mirrored copies (phase-aware targets)
   joint_limits.json    learned anatomical limits (copy of configs/skeletons/soma_joint_limits.json)
   soma_mesh.bin/.json  NVIDIA SOMA body mesh for skinning (from showcase/build/extract_mesh.py)
   config.json          defaults + presets for the web controller (from configs/)
@@ -39,6 +40,56 @@ def key_frame(clip, key):
             "end": last}.get(key, last // 2)
 
 
+CLIP_SOURCES = ["locomotion/bs_1d_linear", "locomotion/bs_2d_directional", "locomotion/bs_2d_directional_crouch",
+                "locomotion/idle/idle_loop_001__A268.bvh", "locomotion/idle/legs_relax_002__A407.bvh",
+                "locomotion/idle/neutral_looking_around_R_001__A542.bvh", "locomotion/idle/crouch_idle_001__A529.bvh"]
+
+
+def export_clips(lib, sk, lim) -> None:
+    """Continuous 30 fps clips (plus left/right mirrored copies) for phase-aware target selection.
+
+    clips.bin: per clip, float32 root position [F, 3] then int16 quaternions [F, Jm, 4] (/32767) for the
+    Jm joints the network predicts; every other joint takes the relaxed pose from joint_limits.json.
+    """
+    from somart.mirror import Mirror
+    meta_m = json.loads((ROOT / "showcase/build/cache/soma_mesh.json").read_text())
+    raw = (ROOT / "showcase/build/cache/soma_mesh.bin").read_bytes()
+    ib = meta_m["inverseBind"]
+    mirror = Mirror(sk, Mirror.bind_from_inverse_bind(
+        np.frombuffer(raw, np.float32, count=ib["length"], offset=ib["offset"]).reshape(-1, 16)))
+    joints = [sk.index(n) for n in C.JOINT_NAMES]
+    names = [n for s in CLIP_SOURCES for n in lib.find(s)]
+    have = set(names)
+    entries, blobs, off = [], [], 0
+    for name in dict.fromkeys(names):
+        clip = lib.clips[name]
+        local = clip.local.astype(np.float64).copy()
+        local[:, 1:, :3] = sk.reference[None, 1:, :3]
+        variants = [(name, local, False)]
+        if not (name.endswith("_M.bvh") or name.replace(".bvh", "_M.bvh") in have):
+            variants.append((name.replace(".bvh", "_mirror.bvh"), mirror(local), True))
+        for vname, loc, mir in variants:
+            loc = lim.apply(loc, relax_unmapped=True)
+            q = loc[:, joints, 3:]
+            q = np.where(q[..., 3:4] < 0, -q, q)
+            root = loc[:, 0, :3].astype(np.float32)
+            qi = np.round(q * 32767).astype(np.int16)
+            blob = root.tobytes() + qi.tobytes()
+            entries.append({"name": vname, "category": clip.tags.get("category", ""), "frames": int(len(loc)),
+                            "offset": off, "mirrored": mir})
+            blobs.append(blob)
+            off += len(blob)
+    with open(OUT / "clips.bin", "wb") as f:
+        for b in blobs:
+            f.write(b)
+    (OUT / "clips.json").write_text(json.dumps({
+        "fps": lib.fps, "joints": [sk.names[j] for j in joints], "clips": entries,
+        "layout": "per clip: float32 root[F,3] then int16 quat[F,Jm,4] (/32767); other joints: relaxed pose",
+        "license": "Derived from NVIDIA MotionBricks sample clips (NVIDIA Sample Data Evaluation License)"}))
+    total = sum(e["frames"] for e in entries)
+    print(f"{len(entries)} clips, {total} frames ({off / 1e6:.2f} MB) -> clips.bin")
+
+
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     cfg = Config.load("balanced")
@@ -68,6 +119,7 @@ def main() -> int:
                          "root0": [float(g0[0][0]), float(g0[0][2]), g0[1]], "rootk": [float(gk[0][0]), float(gk[0][2]), gk[1]]}
         wins.append(w)
         meta.append({"v": [0, 0], "yr": 0, "h": round(float(w.height), 4), "cat": name, "kind": "action"})
+    export_clips(lib, sk, lim)
     local = np.stack([lim.apply(w.local, relax_unmapped=True) for w in wins])     # [W, 4, J, 7]
     root = local[:, :, 0, :3].astype(np.float32)                                 # [W, 4, 3]
     q = local[..., 3:]

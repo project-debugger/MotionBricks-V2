@@ -20,6 +20,15 @@ const [skel, lim, wmeta, wbin, models] = await Promise.all([getJSON('data/skelet
   getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('models/models.json')]);
 const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
 const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk), J = sk.names.length;
+const { ClipLibrary } = await import('../../js/library.js');
+const [cmeta, cbin] = await Promise.all([getJSON('data/clips.json'), getBin('data/clips.bin')]);
+const clips = q.get('ctrl') === 'baseline' || q.has('noclips') ? null : new ClipLibrary(sk, cmeta, cbin, limits);
+const { TransitionBank } = await import('../../js/bank.js');
+const { legIndices } = await import('../../js/library.js');
+const [bmeta, bbin] = await Promise.all([getJSON('data/bank.json'), getBin('data/bank.bin')]);
+const tb0 = performance.now();
+const bank = q.get('ctrl') === 'baseline' || q.has('nobank') ? null : new TransitionBank(sk, bmeta, bbin, limits, legIndices(sk));
+const bankMs = performance.now() - tb0;
 const S = { ...DEFAULTS, model: modelKey, ...JSON.parse(q.get('settings') || '{}') };
 
 const worker = new Worker(new URL('../../js/worker.js', import.meta.url), { type: 'module' });
@@ -40,23 +49,31 @@ worker.onmessage = (e) => {
 worker.postMessage({ type: 'load', base: BASE + 'models/', model: modelKey, info: models.models[modelKey], skeleton: sk, jointLimits: lim, threads: 1 });
 const rinfo = await ready;
 const generate = (req) => new Promise((resolve, reject) => { const id = nextId++; waiting.set(id, { resolve, reject }); worker.postMessage({ type: 'generate', id, ...req }); });
-const ctrl = new Controller({ sk, lib, limits, settings: () => S, generate, actions: wmeta.actions });
+const ctrl = new Controller({ sk, lib, clips, bank, limits, settings: () => S, generate, actions: wmeta.actions });
+ctrl.debugStages = true; let prevStages = null; const stageSpikes = [];
+const PJ = ['LeftFoot', 'RightFoot', 'LeftHand', 'RightHand', 'RightArm', 'LeftLeg', 'Neck2', 'LeftToeBase', 'Spine2'].map((n) => [n, sk.names.indexOf(n)]), pj = {};
 
 // scripted input: [start s, move dir (world x,z) or null, gait]
-const SCRIPT = [[0, null, 'run'], [2, [0, 1], 'run'], [6, [1, 0], 'run'], [9, [-1, 0], 'run'], [12, null, 'run'],
+const SCRIPT = q.has('actions')
+  ? [[0, null, 'run'], [1.5, null, 'run', 'jump'], [4, null, 'run', 'dodge'], [6.5, null, 'run', 'duck'], [9, [0, 1], 'run'], [10.5, [0, 1], 'run', 'jump'], [13, [0, 1], 'run', 'dodge'], [15.5, [0, 1], 'run', 'duck'], [18, null, 'run'], [19.5, null, 'end']]
+  : [[0, null, 'run'], [2, [0, 1], 'run'], [6, [1, 0], 'run'], [9, [-1, 0], 'run'], [12, null, 'run'],
   [14, [0.7071, 0.7071], 'walk'], [17, [0, 1], 'sprint'], [19, null, 'run'], [21.5, null, 'end']];
+let lastSeg = -1;
 const cmdAt = (t) => { let c = SCRIPT[0]; for (const s of SCRIPT) if (t >= s[0]) c = s; return c; };
 const gaitSpeed = { walk: S.walkSpeed, run: S.runSpeed, sprint: S.sprintSpeed };
 const rec = [];
 const iR = sk.names.indexOf('RightLeg'), iL = sk.names.indexOf('LeftLeg');
 let prevPose = null, t0 = performance.now(), last = t0, clampedFrames = 0;
-const updMs = [];
+const updMs = []; let nanFrames = 0, firstNaN = null; const spikes = [], events = []; let lastGen = 0, lastInst = 0, lastLate = 0;
+const JNAMES = ['Hips', 'Chest', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightArm', 'RightForeArm', 'RightHand', 'LeftFoot', 'RightFoot', 'Head'], jrec = [];
 await new Promise((done) => {
   function frame(now) {
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
     const t = (now - t0) / 1000, c = cmdAt(t);
     if (c[2] === 'end') { done(); return; }
-    const cmd = { move: c[1] ? c[1].slice() : [0, 0], gait: c[2], action: null };
+    const segIdx = SCRIPT.indexOf(c);
+    const cmd = { move: c[1] ? c[1].slice() : [0, 0], gait: c[2], action: c[3] && segIdx !== lastSeg ? c[3] : null };
+    lastSeg = segIdx;
     const u0 = performance.now();
     const pose = ctrl.update(cmd, dt);
     updMs.push(performance.now() - u0);
@@ -64,9 +81,26 @@ await new Promise((done) => {
     if (atEnd) clampedFrames++;
     const w = M.fk(pose, sk.parents);
     let maxRot = 0;
-    if (prevPose && dt > 0) for (let j = 1; j < J; j++) maxRot = Math.max(maxRot, M.vlen(M.qToScaledAxis(M.qmul(M.Q(pose, j), M.qconj(M.Q(prevPose, j))))) / Math.max(dt, 1 / 60));
+    for (let n = 0; n < pose.length; n++) if (!Number.isFinite(pose[n])) { nanFrames++; if (!firstNaN) firstNaN = { frame: rec.length, t: +t.toFixed(3), dt, joints: [...new Set(Array.from(pose).map((x, i) => (Number.isFinite(x) ? -1 : Math.floor(i / 7))).filter((j) => j >= 0))].map((j) => sk.names[j]).slice(0, 12), inert: ctrl.inert.ro.some((x) => !Number.isFinite(x)), look: [ctrl.look.x, ctrl.look.v, ctrl.look.heading], fing: Array.from(ctrl.fingers.x).slice(0, 3) }; break; }
+    let maxJ = -1;
+    if (prevPose && dt > 0) for (let j = 1; j < J; j++) { const w = M.vlen(M.qToScaledAxis(M.qmul(M.Q(pose, j), M.qconj(M.Q(prevPose, j))))) / Math.max(dt, 1 / 60); if (w > maxRot) { maxRot = w; maxJ = j; } }
+    if (ctrl.stats.generations !== lastGen || ctrl.stats.instant !== lastInst || ctrl.stats.late !== lastLate) { events.push([+t.toFixed(2), ctrl.stats.instant !== lastInst ? 'instant:' + ctrl.stats.lastInstant : 'splice', ctrl.stats.late !== lastLate ? 'LATE' : '', ctrl.stats.discarded]); lastGen = ctrl.stats.generations; lastInst = ctrl.stats.instant; lastLate = ctrl.stats.late; }
+    if (prevStages && maxRot > 30 && stageSpikes.length < 12) {
+      const jn = maxJ, row = { t: +t.toFixed(2), joint: sk.names[jn] };
+      for (const k of ['sample', 'inert', 'feet', 'limits', 'final']) row[k] = +(M.vlen(M.qToScaledAxis(M.qmul(M.Q(ctrl.lastStages[k], jn), M.qconj(M.Q(prevStages[k], jn))))) / Math.max(dt, 1 / 60)).toFixed(1);
+      const pj = sk.parents[jn]; row.parentSample = +(M.vlen(M.qToScaledAxis(M.qmul(M.Q(ctrl.lastStages.sample, pj), M.qconj(M.Q(prevStages.sample, pj))))) / Math.max(dt, 1 / 60)).toFixed(1);
+      row.parentLimits = +(M.vlen(M.qToScaledAxis(M.qmul(M.Q(ctrl.lastStages.limits, pj), M.qconj(M.Q(prevStages.limits, pj))))) / Math.max(dt, 1 / 60)).toFixed(1);
+      stageSpikes.push(row);
+    }
+    if (prevStages) for (const [n, j] of PJ) for (const k of ['sample', 'final']) {
+      const w = M.vlen(M.qToScaledAxis(M.qmul(M.Q(ctrl.lastStages[k], j), M.qconj(M.Q(prevStages[k], j))))) / Math.max(dt, 1 / 60);
+      (pj[n + ':' + k] ||= []).push(w);
+    }
+    prevStages = ctrl.lastStages;
+    if (maxRot > 30 && spikes.length < 40) spikes.push([+t.toFixed(2), sk.names[maxJ], +maxRot.toFixed(0), ctrl.stats.instant, ctrl.stats.generations]);
     prevPose = pose;
     rec.push({ t, dt, x: w[0], z: w[2], y: w[1], yaw: headingFromHips(M.P(w, iR), M.P(w, iL)), goal: c[1] ? [c[1][0] * gaitSpeed[c[2]], c[1][1] * gaitSpeed[c[2]]] : [0, 0], atEnd, maxRot });
+    if (q.has('joints')) jrec.push(JNAMES.map((n) => { const j = sk.names.indexOf(n); return [w[j * 7], w[j * 7 + 1], w[j * 7 + 2]]; }).flat().map((v) => +v.toFixed(4)));
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -98,17 +132,32 @@ for (let s = 1; s < SCRIPT.length - 1; s++) {
       if (along > 0.5 * gs && along > 0.85 * speed[i]) { hit = r.t - ts; break; }
     }
   }
-  resp.push({ at: ts, to: dir ? `${gait} ${dir.map((x) => x.toFixed(1)).join(',')}` : 'stop', seconds: hit === null ? null : +hit.toFixed(2) });
+  // onset: first visible change toward the new command
+  let onset = null, i0 = rec.findIndex((r) => r.t >= ts);
+  const v0 = vel[Math.max(0, i0)], s0 = Math.hypot(v0[0], v0[1]);
+  for (let i = i0; i >= 0 && i < rec.length; i++) {
+    const r = rec[i]; if (r.t > SCRIPT[s + 1][0]) break;
+    const v = vel[i], sp = Math.hypot(v[0], v[1]);
+    let ok = false;
+    if (!dir) ok = sp < s0 * 0.85 - 0.05;
+    else if (s0 < 0.3) ok = sp > 0.3;
+    else { const a0 = Math.atan2(v0[0], v0[1]), a = Math.atan2(v[0], v[1]), want = Math.atan2(dir[0], dir[1]);
+      const d0 = Math.abs(Math.atan2(Math.sin(want - a0), Math.cos(want - a0))), d1 = Math.abs(Math.atan2(Math.sin(want - a), Math.cos(want - a)));
+      ok = d0 - d1 > 0.17 || (d0 < 0.17 && Math.abs(sp - gs) < Math.abs(s0 - gs) - 0.3); }
+    if (ok) { onset = r.t - ts; break; }
+  }
+  resp.push({ at: ts, to: dir ? `${gait} ${dir.map((x) => x.toFixed(1)).join(',')}` : 'stop', seconds: hit === null ? null : +hit.toFixed(2), onset: onset === null ? null : +onset.toFixed(2) });
 }
 const rots = rec.map((r) => r.maxRot).filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 const nt = netTimes.slice().sort((a, b) => a - b);
 window.RESULT = {
   ctrl: q.get('ctrl') || 'new', model: modelKey, extraMs: extra, jitterMs: jitter, threads: rinfo.threads,
-  workerMsMedian: Math.round(pct(nt, 0.5)), generations: ctrl.stats.generations, late: ctrl.stats.late, failures: ctrl.stats.failures, extended: ctrl.stats.extended, steeringDeg: Math.round((ctrl.stats.steering || 0) * 57.3),
-  frames: rec.length, freezeSeconds: +freezeT.toFixed(2), lurchSeconds: +lurchT.toFixed(2), surgeSeconds: +surgeT.toFixed(2),
+  workerMsMedian: Math.round(pct(nt, 0.5)), generations: ctrl.stats.generations, late: ctrl.stats.late, failures: ctrl.stats.failures, instant: ctrl.stats.instant, discarded: ctrl.stats.discarded, bankMs: Math.round(bankMs), lastInstant: ctrl.stats.lastInstant, instantLog: ctrl.stats.instantLog, extended: ctrl.stats.extended, steeringDeg: Math.round((ctrl.stats.steering || 0) * 57.3),
+  frames: rec.length, nanFrames, firstNaN, spikes, events, stageSpikes, seams: ctrl.stats.seams,
+  perJoint: Object.fromEntries(Object.entries(pj).map(([k, v]) => { const a = v.slice().sort((x, y) => x - y); return [k, [+a[Math.floor(a.length * 0.99)].toFixed(1), +a[a.length - 1].toFixed(1)]]; })), rotNaN: rec.filter((r) => !Number.isFinite(r.maxRot)).length, freezeSeconds: +freezeT.toFixed(2), lurchSeconds: +lurchT.toFixed(2), surgeSeconds: +surgeT.toFixed(2),
   maxSpeed: +Math.max(...speed.slice(sm)).toFixed(2), jointRadPerSecP99: +pct(rots, 0.99).toFixed(1), jointRadPerSecMax: +rots[rots.length - 1].toFixed(1),
   updateMsP50: +pct(updMs.slice().sort((a, b) => a - b), 0.5).toFixed(2), updateMsP99: +pct(updMs.slice().sort((a, b) => a - b), 0.99).toFixed(2),
-  responseSeconds: resp, trace: q.has('trace') ? rec.map((r, i) => [+r.t.toFixed(3), +r.x.toFixed(3), +r.z.toFixed(3), +speed[i].toFixed(2), r.atEnd ? 1 : 0]) : undefined,
+  responseSeconds: resp, joints: q.has('joints') ? { names: JNAMES, t: rec.map((r) => +r.t.toFixed(3)), w: jrec } : undefined, trace: q.has('trace') ? rec.map((r, i) => [+r.t.toFixed(3), +r.x.toFixed(3), +r.z.toFixed(3), +speed[i].toFixed(2), r.atEnd ? 1 : 0]) : undefined,
 };
 </script>

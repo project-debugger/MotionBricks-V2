@@ -4,6 +4,9 @@ import * as THREE from 'three';
 import * as M from './math3d.js';
 import { bindLimits } from './codec.js';
 import { Controller, Library } from './controller.js';
+import { ClipLibrary, legIndices } from './library.js';
+import { TransitionBank } from './bank.js';
+import { BodyFX } from './body.js';
 import { PRESETS, DEFAULTS } from './settings.js';
 
 const $ = (s) => document.querySelector(s);
@@ -66,7 +69,9 @@ function buildScene(mesh) {
   const inv = view('inverseBind', Float32Array), inverses = [];
   for (let j = 0; j < 77; j++) inverses.push(new THREE.Matrix4().fromArray(inv, j * 16));
   const bones = inverses.map(() => { const b = new THREE.Bone(); scene.add(b); return b; });
-  const body = new THREE.SkinnedMesh(geo, new THREE.MeshStandardMaterial({ color: '#c8bfb4', roughness: 0.52 }));
+  // skin: soft sheen at grazing angles reads as skin rather than plastic
+  const skin = new THREE.MeshPhysicalMaterial({ color: '#c9b3a5', roughness: 0.55, sheen: 0.4, sheenRoughness: 0.6, sheenColor: new THREE.Color('#ffc9b5'), specularIntensity: 0.35 });
+  const body = new THREE.SkinnedMesh(geo, skin);
   body.castShadow = true; body.frustumCulled = false; body.bind(new THREE.Skeleton(bones, inverses), new THREE.Matrix4()); scene.add(body);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 120);
   const chair = new THREE.Group(); chair.visible = false; scene.add(chair);
@@ -80,7 +85,7 @@ function buildScene(mesh) {
   };
   const resize = () => { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); };
   addEventListener('resize', resize); resize();
-  return { renderer, scene, camera, bones, sun, chair, landmarks };
+  return { renderer, scene, camera, bones, sun, chair, landmarks, geo, inverses, skin };
 }
 
 // ------------------------------------------------------------------ input
@@ -166,9 +171,10 @@ const SLIDERS = [
   ['predictionHorizon', 'Planning horizon', 0.5, 1.4, 0.05, 's'], ['playbackRate', 'Animation speed', 0.5, 1.5, 0.05, 'x'],
   ['smoothing', 'Extra smoothing', 0, 0.6, 0.05, ''], ['variation', 'Motion variety', 0, 0.5, 0.05, ''],
   ['fingerCurlRun', 'Finger curl when running', 0, 50, 1, 'deg'], ['fingerFollow', 'Finger follow-through', 0, 20, 1, ''],
-  ['steering', 'Instant steering (0 = off)', 0, 360, 10, 'deg/s'],
+  ['steering', 'Body-rotation assist (0 = off)', 0, 360, 10, 'deg/s'],
 ];
-const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomical joint limits'], ['fingers', 'Procedural fingers'], ['velocityMatching', 'Velocity-matched joins'], ['lookAt', 'Head leads turns']];
+const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomical joint limits'], ['fingers', 'Procedural fingers'], ['velocityMatching', 'Velocity-matched joins'], ['lookAt', 'Head leads turns'],
+  ['instant', 'Instant response (pre-generated SOMA transitions)'], ['bodyFX', 'Muscles, breathing and soft tissue']];
 function buildPanel(models, onModel) {
   const p = $('#panel-body');
   const mrow = Object.entries(models).map(([k, m]) => `<button class="seg" data-model="${k}" ${m.available ? '' : 'disabled'}>${m.short}<small>${(m.bytes / 1e6).toFixed(0)} MB</small></button>`).join('');
@@ -206,11 +212,17 @@ function buildPanel(models, onModel) {
 async function main() {
   const status = (t) => { $('#status').textContent = t; };
   status('Loading skeleton, motion targets and body mesh...');
-  const [skel, lim, wmeta, wbin, mmeta, mbin, models] = await Promise.all([getJSON('data/skeleton.json'), getJSON('data/joint_limits.json'),
-    getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/soma_mesh.json'), getBin('data/soma_mesh.bin'), getJSON('models/models.json')]);
+  const [skel, lim, wmeta, wbin, mmeta, mbin, models, cmeta, cbin, bmeta, bbin] = await Promise.all([getJSON('data/skeleton.json'), getJSON('data/joint_limits.json'),
+    getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/soma_mesh.json'), getBin('data/soma_mesh.bin'), getJSON('models/models.json'),
+    getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('data/bank.json'), getBin('data/bank.bin')]);
   const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
   const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk);
+  status('Indexing mocap strides and the instant-transition bank...');
+  await new Promise((r) => setTimeout(r, 0));
+  const clips = new ClipLibrary(sk, cmeta, cbin, limits), bank = new TransitionBank(sk, bmeta, bbin, limits, legIndices(sk));
   const R = buildScene({ meta: mmeta, bin: mbin });
+  const bodyFX = new BodyFX(THREE, R.geo, sk, R.inverses, limits);
+  bodyFX.install(R.skin);
   setupInput(R.renderer.domElement);
   const MODELS = {
     balanced: { short: 'Balanced', label: 'Balanced - INT8 pose transformer' },
@@ -250,7 +262,7 @@ async function main() {
     worker.postMessage({ type: 'generate', id, ...req });
   });
   buildPanel(MODELS, loadModel);
-  const ctrl = new Controller({ sk, lib, limits, settings: () => S, generate, actions: wmeta.actions });
+  const ctrl = new Controller({ sk, lib, clips, bank, limits, settings: () => S, generate, actions: wmeta.actions });
 
   // start screen: pick a model, then download
   const startRow = $('#start-models');
@@ -268,11 +280,15 @@ async function main() {
   const camT = new THREE.Vector3(0, 0.95, 0); let last = performance.now(), fpsAcc = 0, fpsN = 0;
   const ray = new THREE.Raycaster(), tmp = new THREE.Vector3();
   function frame(now) {
-    const dt = Math.min(0.1, (now - last) / 1000); last = now; // stays real-time down to 10 fps
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now; // stays real-time down to 10 fps
     let pose;
-    if (ready) pose = ctrl.update(command(dt), dt);
+    if (ready && !window.SOMA_FREEZE) pose = ctrl.update(command(dt), dt);
+    else if (ready) pose = ctrl.display;
     else pose = ctrl.display || ctrl.buffer[3];
+    if (S.bodyFX !== false) pose = bodyFX.posePass(pose, dt);
     const world = M.fk(pose, sk.parents);
+    if (S.bodyFX !== false) bodyFX.update(pose, world, ready ? ctrl.sampleContacts(ctrl.time) : null, Math.hypot(ctrl.simVel[0], ctrl.simVel[2]), S.sprintSpeed, dt);
+    else bodyFX.off();
     for (let j = 0; j < J; j++) { R.bones[j].position.set(world[j * 7], world[j * 7 + 1], world[j * 7 + 2]); R.bones[j].quaternion.set(world[j * 7 + 3], world[j * 7 + 4], world[j * 7 + 5], world[j * 7 + 6]); }
     const hx = world[0], hz = world[2], k = 1 - Math.exp(-dt * 6);
     camT.x += (hx - camT.x) * k; camT.z += (hz - camT.z) * k;
@@ -305,6 +321,6 @@ async function main() {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  window.SOMA_DEBUG = { input, ctrl, S, loadModel };
+  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX };
 }
 main().catch((e) => { $('#status').textContent = `Error: ${e.message}`; console.error(e); });

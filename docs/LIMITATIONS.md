@@ -46,12 +46,18 @@
 - Joint limits are fitted to the 38 sample clips (plus 3° margin); poses outside that range
   (deep squats, splits, acrobatics) would be clamped.
 - Web playground (`site/`): phone performance is unmeasured (no device here). Measured on this
-  machine's CPU: 0.23-0.31 s per generation on one WASM thread (Balanced). Starting and stopping
-  respond after about one generation plus natural acceleration (0.8 s here, ~1.3 s with 0.3-0.6 s
-  of added delay); turns respond in ~0.2 s via steering warps; no freezes or lurches at up to
-  1.2 s of added delay (`site/build/test/sim.html`). First visit downloads 193 MB.
-- Steering warps rotate the buffered motion about the character, so planted feet can slide a few
-  centimetres during a fast turn (foot locking holds them up to 12 cm).
+  machine with 0.3-0.6 s of added delay per generation: every start, stop, turn, gait change and
+  jump/dodge/duck shows its first visible change within 0.03-0.17 s and follows the command within
+  0.13-0.58 s (`site/build/test/sim.html`); no freezes or lurches at up to 1.2 s of added delay.
+- The instant response comes from a bank of 294 transitions generated ahead of time by the same
+  SOMA network (discrete directions every 45 deg, three speeds, four stride phases); the live model
+  refines the exact direction and speed from inside the bank segment. An action tapped while
+  another action is still playing waits for it. Sitting down and standing up are live only.
+- The body layer (muscle bulges, breathing, soft tissue, mouth opening when out of breath) is
+  procedural and tuned by eye; the model and the mocap contain no muscle, breath or face data.
+  The mesh has no eyelids or separately skinned eyes, so there is no blinking or eye motion.
+- Target windows come from 4,737 mocap frames (with mirrored copies); straight running near
+  3.4 m/s and sprinting are still thinly covered (about 20 and 14 frames before mirroring).
 
 ## Training
 

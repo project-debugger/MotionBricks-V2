@@ -9,6 +9,7 @@ const { chromium } = require('playwright');
     const errs = [];
     page.on('pageerror', (e) => errs.push(e.message));
     const qs = new URLSearchParams({ ctrl, model, extra, jitter, settings });
+    if (process.env.SIM_ACTIONS) qs.set('actions', '1');
     await page.goto(`http://localhost:${port}/build/test/sim.html?${qs}`);
     await page.waitForFunction(() => window.RESULT, null, { timeout: 180000 }).catch(() => errs.push('timeout'));
     const r = await page.evaluate(() => window.RESULT || window.LOG);
