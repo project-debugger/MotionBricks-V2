@@ -1,0 +1,12 @@
+# Runtime (CPU). Exact pins match the upstream ONNX exporter environment (tools/onnx/pyproject.toml @54fc563).
+numpy==1.26.4
+onnxruntime>=1.20          # tested 1.32.0; use onnxruntime-gpu / -directml / -openvino for other EPs
+pyyaml>=6.0
+requests>=2.31
+# Export / quantization / torch backend
+onnx==1.23.2
+onnx-ir>=1.1               # needed by onnxruntime MatMulNBits (INT4) quantizer
+safetensors==0.8.0
+protobuf==7.36.1
+# torch==2.14.0+cpu        # install from https://download.pytorch.org/whl/cpu (see tools/setup_env.sh)
+pytest>=8

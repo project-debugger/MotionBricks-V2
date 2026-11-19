@@ -1,0 +1,46 @@
+=== interleaved latency, 1 thread(s)
+loaded fp32 x1
+loaded fp32_ortopt x1
+loaded fp16 x1
+loaded int8 x1
+loaded int8_pose x1
+loaded int4 x1
+loaded int4_pose x1
+int8@1t                p50    47.7 ms  p95    57.5  x2.64
+int8_pose@1t           p50    62.1 ms  p95    80.6  x2.04
+int4@1t                p50    91.3 ms  p95   108.6  x1.38
+int4_pose@1t           p50    98.7 ms  p95   108.3  x1.31
+fp32_ortopt@1t         p50   127.1 ms  p95   143.4  x0.99
+fp32@1t                p50   127.9 ms  p95   144.6  x1.00
+fp16@1t                p50   128.6 ms  p95   156.5  x0.98
+=== interleaved latency, 2 thread(s)
+loaded fp32 x2
+loaded fp32_ortopt x2
+loaded fp16 x2
+loaded int8 x2
+loaded int8_pose x2
+loaded int4 x2
+loaded int4_pose x2
+int8@2t                p50    40.9 ms  p95    50.7  x2.04
+int8_pose@2t           p50    48.9 ms  p95    62.2  x1.69
+int4@2t                p50    62.3 ms  p95    74.4  x1.32
+int4_pose@2t           p50    66.7 ms  p95    87.9  x1.24
+fp32@2t                p50    82.1 ms  p95   106.3  x1.00
+fp32_ortopt@2t         p50    83.2 ms  p95    96.7  x0.98
+fp16@2t                p50    85.5 ms  p95    98.7  x0.94
+=== interleaved latency, 4 thread(s)
+loaded fp32 x4
+loaded fp32_ortopt x4
+loaded fp16 x4
+loaded int8 x4
+loaded int8_pose x4
+loaded int4 x4
+loaded int4_pose x4
+int8@4t                p50    39.7 ms  p95    49.2  x1.62
+int8_pose@4t           p50    43.6 ms  p95    52.4  x1.54
+int4@4t                p50    49.2 ms  p95    59.9  x1.31
+int4_pose@4t           p50    55.1 ms  p95    70.4  x1.14
+fp32@4t                p50    65.5 ms  p95    82.6  x1.00
+fp16@4t                p50    67.1 ms  p95    89.0  x0.99
+fp32_ortopt@4t         p50    69.5 ms  p95    86.6  x0.97
+report: /home/user/MotionBricks-V2/benchmarks/results/20261119-133535/REPORT.md

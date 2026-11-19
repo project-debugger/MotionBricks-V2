@@ -1,0 +1,113 @@
+# MotionBricks SOMA runtime - complete default configuration.
+#
+# Every behaviour of the runtime is driven from here. Presets in configs/presets/ and your own
+# profiles in configs/custom/ only list the keys they change; they are merged over this file.
+# Any key can also be changed while running:  cfg.set("locomotion.run_speed", 4.2)
+#
+# Units: metres, seconds, degrees, frames are 30 Hz model frames.
+
+profile: default
+
+inference:
+  backend: onnxruntime          # onnxruntime | torch
+  model: models/soma/optimized/onnx/soma_int8_pose.onnx
+  precision: int8               # fp32 | fp16 | int8 | int4 | bf16 (torch only)
+  models_by_device: {}          # optional {gpu: path, cpu: path}; picked by hardware detection
+  providers: [CPUExecutionProvider]   # e.g. [TensorrtExecutionProvider, CUDAExecutionProvider, CPUExecutionProvider]
+  device: cpu                   # torch backend only: cpu | cuda
+  checkpoints: models/soma/original   # torch backend only
+  threads: 0                    # intra-op threads, 0 = physical cores - reserve_cores
+  reserve_cores: 1              # cores kept free for game/render threads when async (threads = 0)
+  inter_threads: 1
+  graph_optimization: all       # disable | basic | extended | all
+  memory_arena: true            # false lowers peak RAM, slightly slower first runs
+  memory_pattern: true
+  allow_spinning: true          # false frees CPU between generations (better for many threads/apps)
+  async: true                   # generate on a worker thread; the game loop never blocks
+  max_batch: 16                 # characters merged into one network call
+  memory_limit_mb: 0            # 0 = unlimited; the loader refuses models that do not fit
+
+generation:
+  min_tokens: 6                 # model limit 6..16 tokens (1 token = 4 frames)
+  max_tokens: 14
+  heading_alignment: [1.0, 0.0]
+  correct_endpoints: true       # pose accuracy: snap start/end exactly to context and target
+  velocity_matching: true       # also make velocities continuous at the joins (removes pops)
+  velocity_matching_tau: 4.0    # frames over which the velocity correction fades
+  prediction_horizon: 0.8       # s: how far ahead targets are placed (shorter = snappier, longer = smoother)
+  duration_mode: horizon        # horizon: segment length pinned to the horizon (responsive);
+                                # model: the network picks min..max tokens itself (upstream behaviour)
+  replan_interval: 10           # frames between receding-horizon replans while moving
+  replan_lead: 3                # extra frames of safety margin on top of measured inference latency
+  input_replan_threshold: 0.35  # m/s change of desired velocity that triggers an immediate replan
+  latency_ema: 0.2              # smoothing of the measured generation latency
+
+locomotion:
+  walk_speed: 1.4
+  run_speed: 3.4
+  sprint_speed: 5.5
+  crouch_speed: 0.9
+  acceleration: 9.0             # m/s^2 cap while speeding up
+  deceleration: 12.0            # m/s^2 cap while slowing down
+  responsiveness: 0.12          # s, velocity spring half-life (lower = more immediate)
+  inertia: 1.0                  # multiplies responsiveness; >1 feels heavier, <1 snappier
+  momentum: 0.15                # 0..1 keeps part of the previous velocity when direction flips
+  turn_rate: 540.0              # deg/s max facing change
+  facing_responsiveness: 0.10   # s, facing spring half-life
+  strafe: false                 # true keeps facing while moving sideways
+
+animation:
+  playback_rate: 1.0            # animation speed multiplier
+  transition_duration: 0.18     # s, cross-fade / inertialization length for spliced segments
+  inertialization: true
+  smoothing: 0.0                # 0..1 extra temporal low-pass on joint rotations (0 = off)
+  intensity: 1.0                # 0.5..1.5 scales body motion relative to the reference pose
+  variation: 0.15               # 0..1 randomness when choosing target poses (natural variety)
+  seed: 0
+  foot_locking:
+    enabled: true
+    contact_threshold: 0.55     # model foot-contact confidence that plants a foot
+    release_threshold: 0.35
+    max_correction: 0.12        # m, larger corrections release the lock instead of stretching
+    blend_in: 0.06              # s
+    blend_out: 0.10             # s
+  ground_height: 0.0
+
+skeleton:
+  name: soma
+  definition: ""                # optional skeleton JSON; empty = SOMA rig from the clip library
+  scale: 1.0
+  root: Hips
+
+clips:
+  root: third_party/motionbricks/assets/motions/soma
+  cache: true
+
+# Per-action settings. `source` = clip file or folder (relative to clips.root); `key` picks the
+# target pose of one-shot actions: min_height | max_height | middle | end | fraction 0..1.
+# Nested locomotion/animation/generation keys override the base settings for that action.
+actions:
+  idle:      {source: locomotion/idle/idle_loop_001__A268.bvh, kind: loop}
+  walk:      {source: locomotion/bs_1d_linear, kind: locomotion, gait: walk}
+  run:       {source: locomotion/bs_1d_linear, kind: locomotion, gait: run}
+  sprint:    {source: locomotion/bs_1d_linear, kind: locomotion, gait: sprint, generation: {prediction_horizon: 0.7}}
+  strafe:    {source: locomotion/bs_2d_directional, kind: locomotion, gait: run}
+  crouch:    {source: locomotion/bs_2d_directional_crouch, kind: locomotion, gait: crouch}
+  crouch_idle: {source: locomotion/idle/crouch_idle_001__A529.bvh, kind: loop}
+  jump:      {source: jump/jump_over_obstacle_0_5m_R_001__A415.bvh, kind: oneshot, key: max_height}
+  duck:      {source: avoidance/neutral_avoid_obstacle_bend_down_jog_ff_180_R_001__A544.bvh, kind: oneshot, key: min_height}
+  dodge:     {source: variations/combat_quickstep_ff_idle_180_R_002__A365.bvh, kind: oneshot, key: middle}
+  sit:       {source: sitting/sit_on_chair_start_R_001__A047.bvh, kind: oneshot, key: min_height}
+  stand_up:  {source: sitting/sit_on_chair_stop_R_001__A047.bvh, kind: oneshot, key: end}
+
+# Per-character overrides, e.g. characters: {heavy_guard: {locomotion: {inertia: 1.6}}}
+characters: {}
+
+# Per-skeleton settings (see docs/ANIMALS.md for the multi-skeleton architecture)
+skeletons:
+  soma:
+    model_family: soma_human
+    foot_joints: [LeftFoot, LeftToeBase, RightFoot, RightToeBase]
+    leg_chains:
+      - [LeftLeg, LeftShin, LeftFoot]
+      - [RightLeg, RightShin, RightFoot]

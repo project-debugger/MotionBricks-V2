@@ -1,0 +1,12 @@
+# Example custom profile: balanced preset + a heavy, momentum-driven character and a nimble one.
+# Load with: Config.load("configs/custom/example_heavy_character.yaml")
+extends: presets/balanced.yaml
+profile: example_heavy_character
+characters:
+  heavy_guard:
+    locomotion: {run_speed: 2.8, acceleration: 5.0, deceleration: 6.0, inertia: 1.6, momentum: 0.35, turn_rate: 300}
+    animation: {transition_duration: 0.26, variation: 0.05}
+  scout:
+    locomotion: {run_speed: 4.2, sprint_speed: 6.5, acceleration: 14.0, responsiveness: 0.08, inertia: 0.7}
+actions:
+  sprint: {generation: {prediction_horizon: 0.6}, locomotion: {responsiveness: 0.09}}

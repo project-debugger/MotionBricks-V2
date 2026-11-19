@@ -1,0 +1,71 @@
+# Animal skeleton template - see docs/ANIMALS.md
+name: bird
+family: avian
+up_axis: y
+notes: TEMPLATE ONLY. Flight needs aerodynamic/physics-aware data; no trained model
+  exists.
+hierarchy:
+- Pelvis: null
+- Spine: Pelvis
+- Chest: Spine
+- Neck1: Chest
+- Neck2: Neck1
+- Neck3: Neck2
+- Head: Neck3
+- Beak: Head
+- LeftWingShoulder: Chest
+- LeftWingElbow: LeftWingShoulder
+- LeftWingWrist: LeftWingElbow
+- LeftWingTip: LeftWingWrist
+- LeftThigh: Pelvis
+- LeftShin: LeftThigh
+- LeftTarsus: LeftShin
+- LeftToe: LeftTarsus
+- RightWingShoulder: Chest
+- RightWingElbow: RightWingShoulder
+- RightWingWrist: RightWingElbow
+- RightWingTip: RightWingWrist
+- RightThigh: Pelvis
+- RightShin: RightThigh
+- RightTarsus: RightShin
+- RightToe: RightTarsus
+- Tail: Pelvis
+offsets: null
+roles:
+  pelvis: Pelvis
+  spine:
+  - Spine
+  - Chest
+  neck:
+  - Neck1
+  - Neck2
+  - Neck3
+  head: Head
+  wing_left:
+  - LeftWingShoulder
+  - LeftWingElbow
+  - LeftWingWrist
+  - LeftWingTip
+  wing_right:
+  - RightWingShoulder
+  - RightWingElbow
+  - RightWingWrist
+  - RightWingTip
+  leg_left:
+  - LeftThigh
+  - LeftShin
+  - LeftTarsus
+  - LeftToe
+  leg_right:
+  - RightThigh
+  - RightShin
+  - RightTarsus
+  - RightToe
+  tail:
+  - Tail
+contacts:
+- LeftToe
+- RightToe
+heading_joints:
+- RightThigh
+- LeftThigh

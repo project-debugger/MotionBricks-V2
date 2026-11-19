@@ -1,0 +1,29 @@
+[export] precision=fp32
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/mmm-v6-soma-pose-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/mmm-v6-soma-pose-nova-4n8g-ea43dd8-fp32-v1/version_0/stats/motion/mean.npy
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/mmm-v6-soma-pose-nova-4n8g-ea43dd8-fp32-v1/version_0/stats/motion/std.npy
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/mmm-v6-soma-root-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/vqvae-v6-soma-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Loading mmm-v6-soma-pose-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Loading mmm-v6-soma-root-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Loading vqvae-v6-soma-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Exporting the batched SOMA model...
+/home/user/MotionBricks-V2/third_party/pkgs/motionbricks_onnx/export.py:97: DeprecationWarning: You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, the new torch.export-based ONNX exporter has become the default. Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. For exporting control flow: https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html
+  torch.onnx.export(model, example_inputs(kind), str(output), **kwargs)
+Saved /home/user/MotionBricks-V2/models/soma/optimized/onnx/soma_fp32.onnx. The ONNX graph and tensor interface checks passed.
+[export] fp32 done in 14 s
+[export] precision=fp16
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/mmm-v6-soma-pose-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/mmm-v6-soma-pose-nova-4n8g-ea43dd8-fp32-v1/version_0/stats/motion/mean.npy
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/mmm-v6-soma-pose-nova-4n8g-ea43dd8-fp32-v1/version_0/stats/motion/std.npy
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/mmm-v6-soma-root-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Verified /home/user/MotionBricks-V2/models/soma/original/soma-v6-nova-4n8g-ea43dd8-fp32-v1/vqvae-v6-soma-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Loading mmm-v6-soma-pose-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Loading mmm-v6-soma-root-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Loading vqvae-v6-soma-nova-4n8g-ea43dd8-fp32-v1/version_0/checkpoints/model-step=1500000.safetensors
+Exporting the batched SOMA model...
+/home/user/MotionBricks-V2/third_party/pkgs/motionbricks_onnx/export.py:97: DeprecationWarning: You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, the new torch.export-based ONNX exporter has become the default. Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. For exporting control flow: https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html
+  torch.onnx.export(model, example_inputs(kind), str(output), **kwargs)
+Converting to mixed FP16...
+Saved /home/user/MotionBricks-V2/models/soma/optimized/onnx/soma_fp16.onnx. The ONNX graph and tensor interface checks passed.
+[export] fp16 done in 22 s

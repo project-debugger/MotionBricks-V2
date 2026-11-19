@@ -1,0 +1,15 @@
+# LOW VRAM / LOW MEMORY - INT4 weight-only pose transformer (smallest file among the variants that
+# keep FP32-level motion: 305 MB, ~510 MB resident), no memory arena, 2 threads, small batches.
+# GPU: mixed FP16 export (380 MB). Full-INT4 / full-INT8 are smaller but measurably worse motion.
+profile: low_vram
+inference:
+  model: models/soma/optimized/onnx/soma_int4_pose.onnx
+  precision: int4
+  models_by_device: {gpu: models/soma/optimized/onnx/soma_fp16.onnx, cpu: models/soma/optimized/onnx/soma_int4_pose.onnx}
+  threads: 2
+  memory_arena: false
+  memory_pattern: false
+  allow_spinning: false
+  max_batch: 4
+generation:
+  replan_interval: 12

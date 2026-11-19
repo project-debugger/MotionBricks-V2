@@ -1,0 +1,71 @@
+{
+  "variants": {
+    "soma_fp32_ortopt.onnx": {
+      "method": "onnxruntime offline graph optimization (ORT_ENABLE_EXTENDED)",
+      "onnxruntime": "1.32.0",
+      "build_seconds": 4.2,
+      "source": "soma_fp32.onnx",
+      "bytes": 757335800,
+      "sha256": "3548cfbf2a92ed219bf24a6707c004624c10afd4fd05c040d4b2187a040633b7"
+    },
+    "soma_int8.onnx": {
+      "method": "onnxruntime dynamic quantization, INT8 weights per-channel, INT8 activations quantized at runtime (VNNI/AMX-INT8 kernels on x86)",
+      "quantized_nodes": 121,
+      "scope": [
+        "/mmm_net/",
+        "/decoder/"
+      ],
+      "build_seconds": 19.5,
+      "source": "soma_fp32.onnx",
+      "bytes": 262151204,
+      "sha256": "e0ace5e05681de2a9cd8a2e7ef00d8028c8d53bf5b3c6f001ab07dd13c9d1d56"
+    },
+    "soma_int8_pose.onnx": {
+      "method": "onnxruntime dynamic quantization, INT8 weights per-channel, INT8 activations quantized at runtime (VNNI/AMX-INT8 kernels on x86)",
+      "quantized_nodes": 64,
+      "scope": [
+        "/mmm_net/_transformer_model/"
+      ],
+      "build_seconds": 16.9,
+      "source": "soma_fp32.onnx",
+      "bytes": 350106216,
+      "sha256": "fc0e2f1f394d1ddcb519715a6d7afa0ed828967169faf737d6f2c1c05d126ba5"
+    },
+    "soma_int4.onnx": {
+      "method": "weight-only INT4 (MatMulNBits, block 32, symmetric, accuracy_level 4 = INT8 compute); constant Gemm rewritten to MatMul+Add first",
+      "quantized_nodes": 121,
+      "scope": [
+        "/mmm_net/",
+        "/decoder/"
+      ],
+      "build_seconds": 6.3,
+      "source": "soma_fp32.onnx",
+      "bytes": 198585306,
+      "sha256": "aa80dd869975dd4a708420a9ecc55b78912afc1640c775c7e7aff484866eae94",
+      "gemm_rewritten": 25
+    },
+    "soma_int4_pose.onnx": {
+      "method": "weight-only INT4 (MatMulNBits, block 32, symmetric, accuracy_level 4 = INT8 compute); constant Gemm rewritten to MatMul+Add first",
+      "quantized_nodes": 64,
+      "scope": [
+        "/mmm_net/_transformer_model/"
+      ],
+      "build_seconds": 4.5,
+      "source": "soma_fp32.onnx",
+      "bytes": 304895650,
+      "sha256": "71d95815666e391d98dfa63fc3608492c93a3efa3902e62f8921ccf0f63b496d",
+      "gemm_rewritten": 16
+    },
+    "soma_fp16.onnx": {
+      "bytes": 380327058,
+      "sha256": "68dd6fc1ff867d0149dd3d83198617a1a20cc5f0a697d89ed828acd77c428c93",
+      "method": "upstream motionbricks-onnx exporter @54fc563, mixed FP16 (LayerNorm/Softmax/geometry FP32)"
+    },
+    "soma_fp32.onnx": {
+      "bytes": 757864273,
+      "sha256": "4c005948675c1571ca67ae424061433dfe09508b3a8c358a5f7b122ac4fadc4a",
+      "method": "upstream motionbricks-onnx exporter @54fc563, FP32, opset 17"
+    }
+  },
+  "source_checkpoints": "models/soma/original (verified against upstream SHA256SUMS)"
+}

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Upstream software clone + LFS assets (fetched by tools/fetch_upstream.py; Apache-2.0 code,
+# BVH samples under the NVIDIA Sample Data Evaluation License -> never redistributed here)
+third_party/
+
+# Model weights: downloaded / generated locally, verified by checksum (see models/soma/checksums/)
+models/soma/original/*
+models/soma/optimized/onnx/
+*.onnx
+*.safetensors
+*.part
+
+# Data derived from evaluation-licensed clips (rebuild with datasets/build_eval_set.py)
+datasets/soma_eval/
+
+# Large / local benchmark artefacts
+benchmarks/results/_dumps/
+benchmarks/results/tmp/
+benchmarks/output/

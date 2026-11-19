@@ -1,0 +1,79 @@
+# Animal skeleton template - see docs/ANIMALS.md
+name: wolf
+family: quadruped
+up_axis: y
+notes: TEMPLATE ONLY (topology + semantic roles). No trained model exists for this
+  family; same topology as dog; heavier gait parameters.
+hierarchy:
+- Pelvis: null
+- Spine1: Pelvis
+- Spine2: Spine1
+- Chest: Spine2
+- Neck1: Chest
+- Neck2: Neck1
+- Head: Neck2
+- Jaw: Head
+- LeftScapula: Chest
+- LeftFrontUpperLeg: LeftScapula
+- LeftFrontLowerLeg: LeftFrontUpperLeg
+- LeftFrontFoot: LeftFrontLowerLeg
+- LeftFrontToe: LeftFrontFoot
+- LeftHindUpperLeg: Pelvis
+- LeftHindLowerLeg: LeftHindUpperLeg
+- LeftHindFoot: LeftHindLowerLeg
+- LeftHindToe: LeftHindFoot
+- RightScapula: Chest
+- RightFrontUpperLeg: RightScapula
+- RightFrontLowerLeg: RightFrontUpperLeg
+- RightFrontFoot: RightFrontLowerLeg
+- RightFrontToe: RightFrontFoot
+- RightHindUpperLeg: Pelvis
+- RightHindLowerLeg: RightHindUpperLeg
+- RightHindFoot: RightHindLowerLeg
+- RightHindToe: RightHindFoot
+- Tail1: Pelvis
+- Tail2: Tail1
+- Tail3: Tail2
+- Tail4: Tail3
+offsets: null
+roles:
+  pelvis: Pelvis
+  spine:
+  - Spine1
+  - Spine2
+  - Chest
+  neck:
+  - Neck1
+  - Neck2
+  head: Head
+  tail:
+  - Tail1
+  - Tail2
+  - Tail3
+  - Tail4
+  front_leg_left:
+  - LeftScapula
+  - LeftFrontUpperLeg
+  - LeftFrontLowerLeg
+  - LeftFrontFoot
+  hind_leg_left:
+  - LeftHindUpperLeg
+  - LeftHindLowerLeg
+  - LeftHindFoot
+  front_leg_right:
+  - RightScapula
+  - RightFrontUpperLeg
+  - RightFrontLowerLeg
+  - RightFrontFoot
+  hind_leg_right:
+  - RightHindUpperLeg
+  - RightHindLowerLeg
+  - RightHindFoot
+contacts:
+- LeftFrontToe
+- RightFrontToe
+- LeftHindToe
+- RightHindToe
+heading_joints:
+- RightHindUpperLeg
+- LeftHindUpperLeg

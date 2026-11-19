@@ -1,0 +1,15 @@
+# ULTRA QUALITY - reference-accurate FP32 network, longest planning horizon, all clean-up passes.
+# CPU: FP32 graph pre-optimized by ONNX Runtime (identical output, 35% faster load measured).
+# GPU: TensorRT/CUDA/DirectML/CoreML FP32 when the installed onnxruntime build provides them.
+profile: ultra_quality
+inference:
+  model: models/soma/optimized/onnx/soma_fp32_ortopt.onnx
+  precision: fp32
+  models_by_device: {gpu: models/soma/optimized/onnx/soma_fp32.onnx, cpu: models/soma/optimized/onnx/soma_fp32_ortopt.onnx}
+  providers: [TensorrtExecutionProvider, CUDAExecutionProvider, DmlExecutionProvider, CoreMLExecutionProvider, CPUExecutionProvider]
+generation:
+  prediction_horizon: 0.9
+  replan_interval: 8
+animation:
+  transition_duration: 0.20
+  foot_locking: {enabled: true, max_correction: 0.15}

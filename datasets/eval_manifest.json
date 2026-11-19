@@ -1,0 +1,1506 @@
+{
+ "source": "third_party/motionbricks/assets/motions/soma (upstream @54fc563, LFS-verified)",
+ "license_note": "Derived from NVIDIA Sample Data Evaluation License clips - local use only",
+ "fps": 30,
+ "num_requests": 187,
+ "stride": 24,
+ "per_clip": 6,
+ "windows": [
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_jog_ff_180_R_001__A544.bvh",
+   "category": "avoidance",
+   "t0": 3,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_jog_ff_180_R_001__A544.bvh",
+   "category": "avoidance",
+   "t0": 27,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_jog_ff_180_R_001__A544.bvh",
+   "category": "avoidance",
+   "t0": 51,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_jog_ff_180_R_001__A544.bvh",
+   "category": "avoidance",
+   "t0": 75,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_jog_ff_180_R_001__A544.bvh",
+   "category": "avoidance",
+   "t0": 99,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_jog_ff_180_R_001__A544.bvh",
+   "category": "avoidance",
+   "t0": 123,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_walk_ff_180_R_001__A543.bvh",
+   "category": "avoidance",
+   "t0": 3,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_walk_ff_180_R_001__A543.bvh",
+   "category": "avoidance",
+   "t0": 27,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_walk_ff_180_R_001__A543.bvh",
+   "category": "avoidance",
+   "t0": 51,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_walk_ff_180_R_001__A543.bvh",
+   "category": "avoidance",
+   "t0": 75,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_walk_ff_180_R_001__A543.bvh",
+   "category": "avoidance",
+   "t0": 99,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "avoidance/neutral_avoid_obstacle_bend_down_walk_ff_180_R_001__A543.bvh",
+   "category": "avoidance",
+   "t0": 123,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_001__A415.bvh",
+   "category": "jump",
+   "t0": 3,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_001__A415.bvh",
+   "category": "jump",
+   "t0": 27,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_001__A415.bvh",
+   "category": "jump",
+   "t0": 51,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_001__A415.bvh",
+   "category": "jump",
+   "t0": 75,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_001__A415.bvh",
+   "category": "jump",
+   "t0": 99,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_002__A437.bvh",
+   "category": "jump",
+   "t0": 3,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_002__A437.bvh",
+   "category": "jump",
+   "t0": 27,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_002__A437.bvh",
+   "category": "jump",
+   "t0": 51,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_002__A437.bvh",
+   "category": "jump",
+   "t0": 75,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_5m_R_002__A437.bvh",
+   "category": "jump",
+   "t0": 99,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_75m_R_102__A416.bvh",
+   "category": "jump",
+   "t0": 3,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_75m_R_102__A416.bvh",
+   "category": "jump",
+   "t0": 27,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_75m_R_102__A416.bvh",
+   "category": "jump",
+   "t0": 51,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_75m_R_102__A416.bvh",
+   "category": "jump",
+   "t0": 75,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_75m_R_103__A416.bvh",
+   "category": "jump",
+   "t0": 3,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_75m_R_103__A416.bvh",
+   "category": "jump",
+   "t0": 27,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_75m_R_103__A416.bvh",
+   "category": "jump",
+   "t0": 51,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_0_75m_R_103__A416.bvh",
+   "category": "jump",
+   "t0": 75,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "jump/jump_over_obstacle_no_hand_0_75m_R_103__A416.bvh",
+   "category": "jump",
+   "t0": 3,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "jump/jump_over_obstacle_no_hand_0_75m_R_103__A416.bvh",
+   "category": "jump",
+   "t0": 27,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "jump/jump_over_obstacle_no_hand_0_75m_R_103__A416.bvh",
+   "category": "jump",
+   "t0": 51,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "jump/jump_over_obstacle_no_hand_0_75m_R_103__A416.bvh",
+   "category": "jump",
+   "t0": 75,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/Neutral_walk_forward_002__A057.bvh",
+   "category": "bs_1d_linear",
+   "t0": 3,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/Neutral_walk_forward_002__A057.bvh",
+   "category": "bs_1d_linear",
+   "t0": 27,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/Neutral_walk_forward_002__A057.bvh",
+   "category": "bs_1d_linear",
+   "t0": 51,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/Neutral_walk_forward_002__A057.bvh",
+   "category": "bs_1d_linear",
+   "t0": 75,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/Neutral_walk_forward_002__A057.bvh",
+   "category": "bs_1d_linear",
+   "t0": 99,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/Neutral_walk_forward_002__A057.bvh",
+   "category": "bs_1d_linear",
+   "t0": 123,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_jog_ff_180_R_001__A534.bvh",
+   "category": "bs_1d_linear",
+   "t0": 3,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_jog_ff_180_R_001__A534.bvh",
+   "category": "bs_1d_linear",
+   "t0": 27,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_jog_ff_180_R_001__A534.bvh",
+   "category": "bs_1d_linear",
+   "t0": 51,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_jog_ff_180_R_001__A534.bvh",
+   "category": "bs_1d_linear",
+   "t0": 75,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_jog_ff_180_R_001__A534.bvh",
+   "category": "bs_1d_linear",
+   "t0": 99,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_walk_ff_180_R_002__A536_M.bvh",
+   "category": "bs_1d_linear",
+   "t0": 3,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_walk_ff_180_R_002__A536_M.bvh",
+   "category": "bs_1d_linear",
+   "t0": 27,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_walk_ff_180_R_002__A536_M.bvh",
+   "category": "bs_1d_linear",
+   "t0": 51,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_walk_ff_180_R_002__A536_M.bvh",
+   "category": "bs_1d_linear",
+   "t0": 75,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_walk_ff_180_R_002__A536_M.bvh",
+   "category": "bs_1d_linear",
+   "t0": 99,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/neutral_walk_ff_180_R_002__A536_M.bvh",
+   "category": "bs_1d_linear",
+   "t0": 123,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/run_loop_180_R_003__A326.bvh",
+   "category": "bs_1d_linear",
+   "t0": 3,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_1d_linear/run_loop_180_R_003__A331.bvh",
+   "category": "bs_1d_linear",
+   "t0": 3,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional/jog_ff_loop_270_R_very_fast_002__A455.bvh",
+   "category": "bs_2d_directional",
+   "t0": 3,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional/jog_ff_loop_270_R_very_fast_002__A455_M.bvh",
+   "category": "bs_2d_directional",
+   "t0": 3,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional/jog_ff_loop_360_R_very_fast_001__A454.bvh",
+   "category": "bs_2d_directional",
+   "t0": 3,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_180_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 3,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_180_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 27,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_180_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 51,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_180_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 75,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_180_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 99,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 3,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 27,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 51,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 75,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 99,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196_M.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 3,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196_M.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 27,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196_M.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 51,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196_M.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 75,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196_M.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 99,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_270_R_002__A196_M.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 123,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_360_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 3,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_360_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 27,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_360_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 51,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_360_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 75,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_360_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 99,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/bs_2d_directional_crouch/crouch_ff_loop_360_R_001__A196.bvh",
+   "category": "bs_2d_directional_crouch",
+   "t0": 123,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/crouch_idle_001__A529.bvh",
+   "category": "idle",
+   "t0": 3,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/crouch_idle_001__A529.bvh",
+   "category": "idle",
+   "t0": 27,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/crouch_idle_001__A529.bvh",
+   "category": "idle",
+   "t0": 51,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/crouch_idle_001__A529.bvh",
+   "category": "idle",
+   "t0": 75,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/crouch_idle_001__A529.bvh",
+   "category": "idle",
+   "t0": 99,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/crouch_idle_001__A529.bvh",
+   "category": "idle",
+   "t0": 123,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/idle_loop_001__A268.bvh",
+   "category": "idle",
+   "t0": 3,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/idle_loop_001__A268.bvh",
+   "category": "idle",
+   "t0": 27,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/idle_loop_001__A268.bvh",
+   "category": "idle",
+   "t0": 51,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/idle_loop_001__A268.bvh",
+   "category": "idle",
+   "t0": 75,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/idle_loop_001__A268.bvh",
+   "category": "idle",
+   "t0": 99,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/idle_loop_001__A268.bvh",
+   "category": "idle",
+   "t0": 123,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/legs_relax_002__A407.bvh",
+   "category": "idle",
+   "t0": 3,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/legs_relax_002__A407.bvh",
+   "category": "idle",
+   "t0": 27,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/legs_relax_002__A407.bvh",
+   "category": "idle",
+   "t0": 51,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/legs_relax_002__A407.bvh",
+   "category": "idle",
+   "t0": 75,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/legs_relax_002__A407.bvh",
+   "category": "idle",
+   "t0": 99,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/legs_relax_002__A407.bvh",
+   "category": "idle",
+   "t0": 123,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.0
+  },
+  {
+   "clip": "locomotion/idle/neutral_looking_around_R_001__A542.bvh",
+   "category": "idle",
+   "t0": 3,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/neutral_looking_around_R_001__A542.bvh",
+   "category": "idle",
+   "t0": 27,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/neutral_looking_around_R_001__A542.bvh",
+   "category": "idle",
+   "t0": 51,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/neutral_looking_around_R_001__A542.bvh",
+   "category": "idle",
+   "t0": 75,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/neutral_looking_around_R_001__A542.bvh",
+   "category": "idle",
+   "t0": 99,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/neutral_looking_around_R_001__A542.bvh",
+   "category": "idle",
+   "t0": 123,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/warm_up_neck_001__A359.bvh",
+   "category": "idle",
+   "t0": 3,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/warm_up_neck_001__A359.bvh",
+   "category": "idle",
+   "t0": 27,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/warm_up_neck_001__A359.bvh",
+   "category": "idle",
+   "t0": 51,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/warm_up_neck_001__A359.bvh",
+   "category": "idle",
+   "t0": 75,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/warm_up_neck_001__A359.bvh",
+   "category": "idle",
+   "t0": 99,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "locomotion/idle/warm_up_neck_001__A359.bvh",
+   "category": "idle",
+   "t0": 123,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_loop.bvh",
+   "category": "sitting",
+   "t0": 3,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_loop.bvh",
+   "category": "sitting",
+   "t0": 27,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_loop.bvh",
+   "category": "sitting",
+   "t0": 51,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_loop.bvh",
+   "category": "sitting",
+   "t0": 75,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_loop.bvh",
+   "category": "sitting",
+   "t0": 99,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_start_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 3,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_start_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 27,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_start_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 51,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_start_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 75,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_start_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 99,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_start_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 123,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_stop_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 3,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_stop_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 27,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_stop_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 51,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_stop_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 75,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "sitting/sit_on_chair_stop_R_001__A047.bvh",
+   "category": "sitting",
+   "t0": 99,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365_M.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365_M.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365_M.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365_M.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365_M.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_090_R_001__A365_M.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_360_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_360_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_360_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_360_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_360_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_combat_quickstep_ff_idle_360_R_001__A365.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_gun_walk_ff_loop_090_R_001__A393.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_gun_walk_ff_loop_090_R_001__A393.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/angry_gun_walk_ff_loop_090_R_001__A393.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/combat_quickstep_ff_idle_180_R_002__A365.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/combat_quickstep_ff_idle_180_R_002__A365.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/combat_quickstep_ff_idle_180_R_002__A365.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/combat_quickstep_ff_idle_180_R_002__A365.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/combat_quickstep_ff_idle_180_R_002__A365.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/combat_quickstep_ff_idle_180_R_002__A365.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dance_vouge_vogue_sequence_180_R_002__A316.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dance_vouge_vogue_sequence_180_R_002__A316.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dance_vouge_vogue_sequence_180_R_002__A316.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dance_vouge_vogue_sequence_180_R_002__A316.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dance_vouge_vogue_sequence_180_R_002__A316.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dance_vouge_vogue_sequence_180_R_002__A316.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dancecards1_AB_injured_L_leg_001__A005.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dancecards1_AB_injured_L_leg_001__A005.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dancecards1_AB_injured_L_leg_001__A005.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dancecards1_AB_injured_L_leg_001__A005.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dancecards1_AB_injured_L_leg_001__A005.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/dancecards1_AB_injured_L_leg_001__A005.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_L_leg_grab_walk_ff_180_002__A549.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_L_leg_grab_walk_ff_180_002__A549.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_L_leg_grab_walk_ff_180_002__A549.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_L_leg_grab_walk_ff_180_002__A549.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_L_leg_grab_walk_ff_180_002__A549.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_L_leg_grab_walk_ff_180_002__A549.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_torso_grab_walk_ff_180_001__A549.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_torso_grab_walk_ff_180_001__A549.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_torso_grab_walk_ff_180_001__A549.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_torso_grab_walk_ff_180_001__A549.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_torso_grab_walk_ff_180_001__A549.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/injured_torso_grab_walk_ff_180_001__A549.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/skipping_R_002__A360.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/skipping_R_002__A360.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/skipping_R_002__A360.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/skipping_R_002__A360.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/skipping_R_002__A360.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/skipping_R_002__A360.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 37,
+   "tokens": 11,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/zombie_walk_180_R_003__A330.bvh",
+   "category": "variations",
+   "t0": 3,
+   "gap": 45,
+   "tokens": 13,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/zombie_walk_180_R_003__A330.bvh",
+   "category": "variations",
+   "t0": 27,
+   "gap": 25,
+   "tokens": 8,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/zombie_walk_180_R_003__A330.bvh",
+   "category": "variations",
+   "t0": 51,
+   "gap": 33,
+   "tokens": 10,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/zombie_walk_180_R_003__A330.bvh",
+   "category": "variations",
+   "t0": 75,
+   "gap": 41,
+   "tokens": 12,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/zombie_walk_180_R_003__A330.bvh",
+   "category": "variations",
+   "t0": 99,
+   "gap": 49,
+   "tokens": 14,
+   "bone_offset_delta_m": 0.00460272
+  },
+  {
+   "clip": "variations/zombie_walk_180_R_003__A330.bvh",
+   "category": "variations",
+   "t0": 123,
+   "gap": 29,
+   "tokens": 9,
+   "bone_offset_delta_m": 0.00460272
+  }
+ ]
+}

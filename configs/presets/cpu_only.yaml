@@ -1,0 +1,9 @@
+# CPU ONLY - never selects a GPU provider; INT8 pose transformer on all cores, no busy-wait
+# spinning so the rest of the game keeps its CPU time between generations.
+profile: cpu_only
+inference:
+  model: models/soma/optimized/onnx/soma_int8_pose.onnx
+  precision: int8
+  models_by_device: {gpu: models/soma/optimized/onnx/soma_int8_pose.onnx, cpu: models/soma/optimized/onnx/soma_int8_pose.onnx}
+  providers: [CPUExecutionProvider]
+  allow_spinning: false

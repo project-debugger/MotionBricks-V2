@@ -1,0 +1,10 @@
+# BALANCED (recommended) - INT8 pose transformer, FP32 root model + decoder.
+# Measured on the eval set: same motion duration as FP32 in 98.9% of requests, MPJPE 7.08 cm
+# vs 6.96 cm FP32, 1.5x (4 threads) - 2.0x (1 thread) faster, half the peak RAM.
+# GPU: mixed FP16 export (INT8 dynamic quantization is a CPU technique).
+profile: balanced
+inference:
+  model: models/soma/optimized/onnx/soma_int8_pose.onnx
+  precision: int8
+  models_by_device: {gpu: models/soma/optimized/onnx/soma_fp16.onnx, cpu: models/soma/optimized/onnx/soma_int8_pose.onnx}
+  providers: [TensorrtExecutionProvider, CUDAExecutionProvider, DmlExecutionProvider, CPUExecutionProvider]

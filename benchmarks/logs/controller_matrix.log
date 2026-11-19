@@ -1,0 +1,10 @@
+[controller] ultra_quality async footlock=True: frame p50 2.56 ms p99 13.18 max 21.0 | over budget 4 | body t90 0.48s (gameplay 0.43s) | track 0.21 m | slide 10.5 cm/s | gens 129 late 0
+[controller] balanced async footlock=True: frame p50 2.31 ms p99 11.05 max 19.4 | over budget 1 | body t90 0.44s (gameplay 0.43s) | track 0.17 m | slide 10.1 cm/s | gens 104 late 0
+[controller] low_vram async footlock=True: frame p50 2.26 ms p99 10.91 max 23.6 | over budget 1 | body t90 0.40s (gameplay 0.43s) | track 0.16 m | slide 8.9 cm/s | gens 89 late 0
+[controller] extreme_performance async footlock=True: frame p50 0.44 ms p99 2.42 max 8.0 | over budget 0 | body t90 0.36s (gameplay 0.43s) | track 0.12 m | slide 14.5 cm/s | gens 72 late 0
+[controller] cpu_only async footlock=True: frame p50 2.64 ms p99 14.26 max 35.9 | over budget 6 | body t90 0.42s (gameplay 0.43s) | track 0.16 m | slide 7.7 cm/s | gens 105 late 0
+[controller] balanced sync footlock=True: frame p50 2.33 ms p99 65.25 max 89.1 | over budget 105 | body t90 0.45s (gameplay 0.43s) | track 0.17 m | slide 9.5 cm/s | gens 105 late 0
+[controller] balanced async footlock=False: frame p50 0.47 ms p99 2.29 max 12.4 | over budget 0 | body t90 0.44s (gameplay 0.43s) | track 0.16 m | slide 16.6 cm/s | gens 104 late 0
+[controller] balanced async footlock=True: frame p50 2.98 ms p99 13.48 max 20.7 | over budget 3 | body t90 1.49s (gameplay 0.43s) | track 1.41 m | slide 8.5 cm/s | gens 104 late 0
+[controller] balanced async footlock=False: frame p50 0.47 ms p99 2.52 max 5.2 | over budget 0 | body t90 0.42s (gameplay 0.43s) | track 0.17 m | slide 18.4 cm/s | gens 104 late 0
+wrote benchmarks/REPORT_controller.md

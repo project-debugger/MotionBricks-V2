@@ -1,0 +1,15 @@
+# EXTREME PERFORMANCE - fastest network (full INT8: x1.6 at 4 threads, x2.6 at 1 thread vs FP32),
+# fewer replans, no IK. Trades accuracy for throughput (MPJPE 8.67 cm vs 6.96 cm): for crowds/LODs.
+profile: extreme_performance
+inference:
+  model: models/soma/optimized/onnx/soma_int8.onnx
+  precision: int8
+  models_by_device: {gpu: models/soma/optimized/onnx/soma_fp16.onnx, cpu: models/soma/optimized/onnx/soma_int8.onnx}
+  providers: [TensorrtExecutionProvider, CUDAExecutionProvider, CPUExecutionProvider]
+  max_batch: 32
+generation:
+  prediction_horizon: 0.7
+  replan_interval: 16
+  max_tokens: 12
+animation:
+  foot_locking: {enabled: false}

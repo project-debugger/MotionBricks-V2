@@ -1,0 +1,17 @@
+This repository contains code derived from NVIDIA MotionBricks
+(https://github.com/NVlabs/motionbricks, commit 54fc563aeaaf819a753d72cc9fdc6713989cdd43),
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES, licensed under the Apache License 2.0
+(http://www.apache.org/licenses/LICENSE-2.0):
+
+- runtime/somart/codec.py      NumPy port of motionbricks/model/soma/kernels.py and
+                               motionbricks/model/kernels.py (encode, decode, conditions,
+                               endpoint correction)
+- runtime/somart/skeleton.py   BVH loading logic ported from motionbricks/io/bvh.py
+- runtime/somart/contract.py   constants from motionbricks/model/contract.py and soma_n1.json
+
+The upstream ONNX exporter (tools/onnx) is used unmodified from third_party/ (not redistributed).
+Changes relative to upstream: vectorised NumPy implementation, batching, and the additional
+velocity-matching and contact-aware options in codec.py.
+
+Model weights: NVIDIA Open Model Agreement. Sample motion clips: NVIDIA Sample Data Evaluation
+License (not redistributed in this repository).
