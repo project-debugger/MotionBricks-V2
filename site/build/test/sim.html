@@ -1,0 +1,114 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SOMA controller timing test</title>
+<!-- Runs the real controller + SOMA model (worker) without rendering, drives a scripted input sequence and
+     measures lurches, freezes, pose pops and input-to-motion response. ?model=balanced&extra=600&ctrl=new
+     extra = milliseconds added to every generation (emulates a slower device). -->
+<script type="module">
+import * as M from '../../js/math3d.js';
+import { bindLimits, headingFromHips } from '../../js/codec.js';
+import { DEFAULTS } from '../../js/settings.js';
+
+const q = new URLSearchParams(location.search);
+const extra = +(q.get('extra') || 0), modelKey = q.get('model') || 'balanced', jitter = +(q.get('jitter') || 0);
+const { Controller, Library } = await import(q.get('ctrl') === 'baseline' ? './controller_baseline.js' : '../../js/controller.js');
+const BASE = new URL('../../', location.href).href;
+const getJSON = async (p) => (await fetch(BASE + p)).json(), getBin = async (p) => (await fetch(BASE + p)).arrayBuffer();
+const log = (m) => { (window.LOG ||= []).push(m); };
+
+const [skel, lim, wmeta, wbin, models] = await Promise.all([getJSON('data/skeleton.json'), getJSON('data/joint_limits.json'),
+  getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('models/models.json')]);
+const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
+const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk), J = sk.names.length;
+const S = { ...DEFAULTS, model: modelKey, ...JSON.parse(q.get('settings') || '{}') };
+
+const worker = new Worker(new URL('../../js/worker.js', import.meta.url), { type: 'module' });
+let nextId = 1; const waiting = new Map(); let readyResolve; const ready = new Promise((r) => { readyResolve = r; });
+const netTimes = [];
+worker.onmessage = (e) => {
+  const m = e.data;
+  if (m.type === 'ready') readyResolve(m);
+  else if (m.type === 'result') {
+    const w = waiting.get(m.id); waiting.delete(m.id);
+    const frames = [], contacts = [];
+    for (let i = 0; i < m.count; i++) { frames.push(m.frames.slice(i * J * 7, (i + 1) * J * 7)); contacts.push(Array.from(m.contacts.slice(i * 4, i * 4 + 4))); }
+    netTimes.push(m.ms.total);
+    const delay = extra + (jitter ? Math.random() * jitter : 0);
+    setTimeout(() => w.resolve({ frames, contacts, tokens: m.tokens }), delay);
+  } else if (m.type === 'error') { if (waiting.has(m.id)) { waiting.get(m.id).reject(new Error(m.error)); waiting.delete(m.id); } else log('load error ' + m.error); }
+};
+worker.postMessage({ type: 'load', base: BASE + 'models/', model: modelKey, info: models.models[modelKey], skeleton: sk, jointLimits: lim, threads: 1 });
+const rinfo = await ready;
+const generate = (req) => new Promise((resolve, reject) => { const id = nextId++; waiting.set(id, { resolve, reject }); worker.postMessage({ type: 'generate', id, ...req }); });
+const ctrl = new Controller({ sk, lib, limits, settings: () => S, generate, actions: wmeta.actions });
+
+// scripted input: [start s, move dir (world x,z) or null, gait]
+const SCRIPT = [[0, null, 'run'], [2, [0, 1], 'run'], [6, [1, 0], 'run'], [9, [-1, 0], 'run'], [12, null, 'run'],
+  [14, [0.7071, 0.7071], 'walk'], [17, [0, 1], 'sprint'], [19, null, 'run'], [21.5, null, 'end']];
+const cmdAt = (t) => { let c = SCRIPT[0]; for (const s of SCRIPT) if (t >= s[0]) c = s; return c; };
+const gaitSpeed = { walk: S.walkSpeed, run: S.runSpeed, sprint: S.sprintSpeed };
+const rec = [];
+const iR = sk.names.indexOf('RightLeg'), iL = sk.names.indexOf('LeftLeg');
+let prevPose = null, t0 = performance.now(), last = t0, clampedFrames = 0;
+const updMs = [];
+await new Promise((done) => {
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    const t = (now - t0) / 1000, c = cmdAt(t);
+    if (c[2] === 'end') { done(); return; }
+    const cmd = { move: c[1] ? c[1].slice() : [0, 0], gait: c[2], action: null };
+    const u0 = performance.now();
+    const pose = ctrl.update(cmd, dt);
+    updMs.push(performance.now() - u0);
+    const atEnd = ctrl.time >= (ctrl.buffer.length - 1) / 30 - 1e-6;
+    if (atEnd) clampedFrames++;
+    const w = M.fk(pose, sk.parents);
+    let maxRot = 0;
+    if (prevPose && dt > 0) for (let j = 1; j < J; j++) maxRot = Math.max(maxRot, M.vlen(M.qToScaledAxis(M.qmul(M.Q(pose, j), M.qconj(M.Q(prevPose, j))))) / Math.max(dt, 1 / 60));
+    prevPose = pose;
+    rec.push({ t, dt, x: w[0], z: w[2], y: w[1], yaw: headingFromHips(M.P(w, iR), M.P(w, iL)), goal: c[1] ? [c[1][0] * gaitSpeed[c[2]], c[1][1] * gaitSpeed[c[2]]] : [0, 0], atEnd, maxRot });
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+});
+
+// ---- metrics
+const sm = 6; // smooth velocity over ~0.1 s
+const vel = rec.map((r, i) => { const a = rec[Math.max(0, i - sm)]; const d = r.t - a.t || 1; return [(r.x - a.x) / d, (r.z - a.z) / d]; });
+const speed = vel.map((v) => Math.hypot(v[0], v[1]));
+let lurchT = 0, freezeT = 0, surgeT = 0;
+rec.forEach((r, i) => {
+  if (i < sm) return;
+  const gs = Math.hypot(r.goal[0], r.goal[1]);
+  if (speed[i] > 8) lurchT += r.dt;
+  if (speed[i] > Math.max(gs, 1) * 1.45 + 0.6) surgeT += r.dt;
+  if (r.atEnd) freezeT += r.dt;
+});
+// response: per scripted change, time until the motion matches the command
+const resp = [];
+for (let s = 1; s < SCRIPT.length - 1; s++) {
+  const [ts, dir, gait] = SCRIPT[s], gs = dir ? gaitSpeed[gait] : 0;
+  let hit = null;
+  for (let i = 0; i < rec.length; i++) {
+    const r = rec[i]; if (r.t < ts) continue; if (r.t > SCRIPT[s + 1][0]) break;
+    const v = vel[i];
+    if (!dir) { if (speed[i] < 0.5) { hit = r.t - ts; break; } }
+    else {
+      const along = v[0] * dir[0] + v[1] * dir[1];
+      if (along > 0.5 * gs && along > 0.85 * speed[i]) { hit = r.t - ts; break; }
+    }
+  }
+  resp.push({ at: ts, to: dir ? `${gait} ${dir.map((x) => x.toFixed(1)).join(',')}` : 'stop', seconds: hit === null ? null : +hit.toFixed(2) });
+}
+const rots = rec.map((r) => r.maxRot).filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
+const nt = netTimes.slice().sort((a, b) => a - b);
+window.RESULT = {
+  ctrl: q.get('ctrl') || 'new', model: modelKey, extraMs: extra, jitterMs: jitter, threads: rinfo.threads,
+  workerMsMedian: Math.round(pct(nt, 0.5)), generations: ctrl.stats.generations, late: ctrl.stats.late, failures: ctrl.stats.failures, extended: ctrl.stats.extended, steeringDeg: Math.round((ctrl.stats.steering || 0) * 57.3),
+  frames: rec.length, freezeSeconds: +freezeT.toFixed(2), lurchSeconds: +lurchT.toFixed(2), surgeSeconds: +surgeT.toFixed(2),
+  maxSpeed: +Math.max(...speed.slice(sm)).toFixed(2), jointRadPerSecP99: +pct(rots, 0.99).toFixed(1), jointRadPerSecMax: +rots[rots.length - 1].toFixed(1),
+  updateMsP50: +pct(updMs.slice().sort((a, b) => a - b), 0.5).toFixed(2), updateMsP99: +pct(updMs.slice().sort((a, b) => a - b), 0.99).toFixed(2),
+  responseSeconds: resp, trace: q.has('trace') ? rec.map((r, i) => [+r.t.toFixed(3), +r.x.toFixed(3), +r.z.toFixed(3), +speed[i].toFixed(2), r.atEnd ? 1 : 0]) : undefined,
+};
+</script>

@@ -46,11 +46,12 @@
 - Joint limits are fitted to the 38 sample clips (plus 3° margin); poses outside that range
   (deep squats, splits, acrobatics) would be clamped.
 - Web playground (`site/`): phone performance is unmeasured (no device here). Measured on this
-  machine's CPU: ~0.3 s per generation with 4 WASM threads (Balanced), ~0.8–1.0 s single-threaded
-  (Light). Slower devices get longer planned segments, so reactions to input lag more. First
-  visit downloads 187–245 MB.
-- Single character per controller; batching several characters into one network call is
-  supported by `SomaEngine.generate_batch` but not yet scheduled automatically by the controller.
+  machine's CPU: 0.23-0.31 s per generation on one WASM thread (Balanced). Starting and stopping
+  respond after about one generation plus natural acceleration (0.8 s here, ~1.3 s with 0.3-0.6 s
+  of added delay); turns respond in ~0.2 s via steering warps; no freezes or lurches at up to
+  1.2 s of added delay (`site/build/test/sim.html`). First visit downloads 193 MB.
+- Steering warps rotate the buffered motion about the character, so planted feet can slide a few
+  centimetres during a fast turn (foot locking holds them up to 12 cm).
 
 ## Training
 
@@ -65,7 +66,7 @@
   locally by `tools/fetch_upstream.py`.
 - Model weights (NVIDIA Open Model Agreement) are downloaded, not committed (size); exact
   checksums are committed in `models/soma/checksums/`.
-- Exception for the web playground: `site/models/` (INT8/INT4 web copies of the weights) and
+- Exception for the web playground: `site/models/` (INT8 web copy of the weights) and
   `site/data/windows.*` (motion windows derived from the evaluation-licensed sample clips) are
   committed so the site can be served. The repository is private; enabling GitHub Pages would
   make both public (see `site/README.md`).

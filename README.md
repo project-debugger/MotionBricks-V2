@@ -116,9 +116,10 @@ Lower level: `engine.generate(context_4_poses, target_1to4_poses)` returns a 30 
 
 ## Web playground
 
-`site/` is a playable browser demo: the real SOMA network (INT8 or INT4 copy) runs in the browser
-with onnxruntime-web, driven by phone touch controls or keyboard and mouse, rendered on NVIDIA's
-SOMA body mesh. Model, presets and quality passes can be switched in its settings panel.
+`site/` is a playable browser demo: the real SOMA network (INT8-pose copy, 193 MB) runs in the
+browser with onnxruntime-web, driven by phone touch controls or keyboard and mouse, rendered on
+NVIDIA's SOMA body mesh. Presets, tuning and quality passes can be changed in its settings panel;
+the controller is built to stay smooth on slow phones (no freezes or catch-up lurches).
 See [site/README.md](site/README.md) for controls, local serving and GitHub Pages deployment
 (`.github/workflows/pages.yml`).
 

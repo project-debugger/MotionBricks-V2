@@ -4,23 +4,13 @@ import * as THREE from 'three';
 import * as M from './math3d.js';
 import { bindLimits } from './codec.js';
 import { Controller, Library } from './controller.js';
+import { PRESETS, DEFAULTS } from './settings.js';
 
 const $ = (s) => document.querySelector(s);
 const BASE = new URL('.', location.href).href;
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
 // ------------------------------------------------------------------ settings
-const PRESETS = {
-  responsive: { responsiveness: 0.06, facingResponsiveness: 0.06, predictionHorizon: 0.65, replanInterval: 6, acceleration: 16, deceleration: 20, smoothing: 0, transitionDuration: 0.14 },
-  balanced: { responsiveness: 0.12, facingResponsiveness: 0.10, predictionHorizon: 0.8, replanInterval: 10, acceleration: 9, deceleration: 12, smoothing: 0, transitionDuration: 0.18 },
-  smooth: { responsiveness: 0.24, facingResponsiveness: 0.22, predictionHorizon: 1.1, replanInterval: 14, acceleration: 6, deceleration: 7, smoothing: 0.35, transitionDuration: 0.3 },
-};
-const DEFAULTS = {
-  model: 'light', preset: 'balanced', walkSpeed: 1.4, runSpeed: 3.4, sprintSpeed: 5.5, crouchSpeed: 0.9, inertia: 1.0, momentum: 0.15,
-  turnRate: 540, replanLead: 3, inputReplanThreshold: 0.35, minTokens: 6, maxTokens: 14, durationMode: 'horizon',
-  velocityMatching: true, playbackRate: 1.0, variation: 0.15, footLocking: true, anatomical: true, fingers: true,
-  fingerCurlRun: 32, fingerFollow: 10, ...PRESETS.balanced,
-};
 let S = { ...DEFAULTS };
 try { Object.assign(S, JSON.parse(localStorage.getItem('soma-settings') || '{}')); } catch { /* private mode */ }
 const save = () => { try { localStorage.setItem('soma-settings', JSON.stringify(S)); } catch { /* ignore */ } };
@@ -148,11 +138,13 @@ function command(dt) {
   if (mag > 0) { ix /= mag; iy /= mag; mag = 1; }
   let gait = input.crouch ? 'crouch' : input.walk ? 'walk' : 'run';
   const jm = Math.hypot(input.joy[0], input.joy[1]);
-  if (jm > 0.12) {
+  if (jm > 0.15) {
     ix = input.joy[0] / jm; iy = input.joy[1] / jm;
-    if (!input.crouch) gait = jm < 0.62 ? 'walk' : 'run';
-    mag = input.crouch ? Math.min(1, jm / 0.62) : gait === 'walk' ? Math.min(1, jm / 0.62) : 1;
-  }
+    // walk/run with hysteresis so a wobbling thumb near the boundary does not flip the gait every frame
+    input.joyRun = input.joyRun ? jm > 0.5 : jm > 0.7;
+    if (!input.crouch) gait = input.joyRun ? 'run' : 'walk';
+    mag = input.crouch || !input.joyRun ? Math.min(1, (jm - 0.15) / 0.45 + 0.35) : 1;
+  } else input.joyRun = false;
   if ((k.has('ShiftLeft') || k.has('ShiftRight') || input.sprintHeld) && !input.crouch) gait = 'sprint';
   // camera-relative direction (camera sits at yaw, looking at the character)
   const fx = -Math.sin(input.camYaw), fz = -Math.cos(input.camYaw);
@@ -174,8 +166,9 @@ const SLIDERS = [
   ['predictionHorizon', 'Planning horizon', 0.5, 1.4, 0.05, 's'], ['playbackRate', 'Animation speed', 0.5, 1.5, 0.05, 'x'],
   ['smoothing', 'Extra smoothing', 0, 0.6, 0.05, ''], ['variation', 'Motion variety', 0, 0.5, 0.05, ''],
   ['fingerCurlRun', 'Finger curl when running', 0, 50, 1, 'deg'], ['fingerFollow', 'Finger follow-through', 0, 20, 1, ''],
+  ['steering', 'Instant steering (0 = off)', 0, 360, 10, 'deg/s'],
 ];
-const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomical joint limits'], ['fingers', 'Procedural fingers'], ['velocityMatching', 'Velocity-matched joins']];
+const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomical joint limits'], ['fingers', 'Procedural fingers'], ['velocityMatching', 'Velocity-matched joins'], ['lookAt', 'Head leads turns']];
 function buildPanel(models, onModel) {
   const p = $('#panel-body');
   const mrow = Object.entries(models).map(([k, m]) => `<button class="seg" data-model="${k}" ${m.available ? '' : 'disabled'}>${m.short}<small>${(m.bytes / 1e6).toFixed(0)} MB</small></button>`).join('');
@@ -221,10 +214,9 @@ async function main() {
   setupInput(R.renderer.domElement);
   const MODELS = {
     balanced: { short: 'Balanced', label: 'Balanced - INT8 pose transformer' },
-    light: { short: 'Light', label: 'Light - INT4 pose transformer' },
   };
   for (const [k, m] of Object.entries(MODELS)) Object.assign(m, { bytes: models.models[k]?.bytes || 0, available: !!models.models[k] });
-  if (!MODELS[S.model].available) S.model = Object.keys(MODELS).find((k) => MODELS[k].available);
+  if (!MODELS[S.model]?.available) { S.model = Object.keys(MODELS).find((k) => MODELS[k].available); save(); } // e.g. the removed Light model
 
   // worker
   const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });

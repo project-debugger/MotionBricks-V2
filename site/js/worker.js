@@ -3,8 +3,7 @@
 import * as ort from '../vendor/ort/ort.wasm.min.mjs';
 import { bind, bindLimits, encode, postProcess } from './codec.js';
 
-const CACHE = 'soma-models-v1';
-let session = null, binding = null, limits = null;
+let session = null, binding = null, limits = null, CACHE = 'soma-models';
 
 async function fetchPart(url, onBytes) {
   let res = null;
@@ -17,6 +16,9 @@ async function fetchPart(url, onBytes) {
 }
 
 async function load({ base, model, info, skeleton, jointLimits, threads }) {
+  // one cache per model build (keyed by its checksum); caches of older builds are deleted
+  CACHE = `soma-model-${model}-${info.sha256.slice(0, 16)}`;
+  try { for (const k of await caches.keys()) if (k.startsWith('soma-model') && k !== CACHE) await caches.delete(k); } catch { /* no Cache Storage */ }
   binding = bind(skeleton);
   limits = bindLimits(jointLimits, skeleton);
   ort.env.wasm.wasmPaths = new URL('../vendor/ort/', self.location.href).href;

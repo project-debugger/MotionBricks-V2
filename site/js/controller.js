@@ -209,22 +209,69 @@ class FingerAnimator {
   }
 }
 
+// Head and chest turn toward the commanded direction before the body does (people look where they are
+// about to go). Gives an immediate visual answer to input while the network is still generating.
+class LookAt {
+  constructor(sk) {
+    const ix = (n) => sk.names.indexOf(n);
+    this.sk = sk; this.chain = [['Chest', 0.15], ['Neck1', 0.25], ['Neck2', 0.25], ['Head', 0.35]].map(([n, f]) => [ix(n), f]);
+    this.iR = ix('RightLeg'); this.iL = ix('LeftLeg'); this.x = 0; this.v = 0; this.heading = null;
+  }
+  apply(local, goal, dt, maxDeg) {
+    const w = M.fk(local, this.sk.parents), h = headingFromHips(M.P(w, this.iR), M.P(w, this.iL));
+    this.heading = this.heading === null ? h : this.heading + M.wrap(h - this.heading) * (1 - Math.exp(-dt / 0.18));
+    const moving = Math.hypot(goal[0], goal[2]) > 0.5, lim = maxDeg * Math.PI / 180;
+    const want = moving ? Math.max(-lim, Math.min(lim, M.wrap(Math.atan2(goal[0], goal[2]) - this.heading))) : 0;
+    [this.x, this.v] = damperDecay(this.x - want, this.v, 0.09, dt); this.x += want;
+    if (Math.abs(this.x) < 1e-3) return local;
+    const out = new Float64Array(local);
+    let pw = M.Q(w, this.sk.parents[this.chain[0][0]]);
+    for (const [j, f] of this.chain) {
+      const lq = M.qmul(M.qconj(pw), M.qmul(M.qYaw(this.x * f), M.qmul(pw, M.Q(out, j))));
+      M.setQ(out, j, M.qnorm(lq)); pw = M.qmul(pw, lq);
+    }
+    return out;
+  }
+}
+
 // ------------------------------------------------------------------ controller
+// Animation-authoritative: every target is predicted from the root state of the frame the new segment
+// starts from (never from a free-running gameplay position), so the model is never asked to catch up.
+// Slow devices: the buffer is extended by looping the last gait cycle instead of freezing, segments get
+// longer as latency grows, and steady motion only replans when the buffer runs low, so the worker is
+// usually free the moment the input changes. Direction changes are answered at once by rotating the
+// buffered future (steering warp); the warp is replayed onto in-flight results so they stay continuous.
+const yawRot = (v, a) => M.qrot(M.qYaw(a), v);
+function rotateFrame(f, pivot, ang) {
+  const out = new Float64Array(f), p = M.P(f, 0), d = yawRot([p[0] - pivot[0], 0, p[2] - pivot[2]], ang);
+  M.setP(out, 0, [pivot[0] + d[0], p[1], pivot[2] + d[2]]);
+  M.setQ(out, 0, M.qnorm(M.qmul(M.qYaw(ang), M.Q(f, 0))));
+  return out;
+}
+// a warp rotates frames after startAbs about pivot by sign * min(total, rate * elapsed): a ramp, then rigid
+const warpAngle = (w, abs) => (abs <= w.startAbs ? 0 : w.sign * Math.min(w.total, w.rate * (abs - w.startAbs) / FPS));
+const LEG_ARM = ['LeftLeg', 'LeftShin', 'LeftFoot', 'RightLeg', 'RightShin', 'RightFoot', 'LeftArm', 'LeftForeArm', 'RightArm', 'RightForeArm', 'Spine1', 'Spine2'];
+
 export class Controller {
   constructor({ sk, lib, limits, settings, generate, actions }) {
     this.sk = sk; this.lib = lib; this.limits = limits; this.S = settings; this.generate = generate; this.actions = actions;
     this.rand = M.rng(7);
     this.simPos = [0, 0, 0]; this.simVel = [0, 0, 0]; this.simAcc = [0, 0, 0]; this.simYaw = 0;
     const idle = place(lib.windows[actions.idle.window], this.simPos, 0).map((f) => applyLimits(limits, f, true));
-    this.buffer = [...idle, ...Array(8).fill(idle[3])];
+    this.buffer = [...idle, ...Array.from({ length: 8 }, () => new Float64Array(idle[3]))];
     this.contacts = this.buffer.map(() => [1, 1, 1, 1]);
     this.time = 3 * DT; this.pending = false; this.framesSincePlan = 1e6; this.lastGoal = [0, 0, 0];
-    this.queue = []; this.commitEnd = -1; this.latency = 0.3;
-    this.stats = { generations: 0, late: 0, lastLatency: 0, lastTokens: 0, failures: 0, error: '' };
+    this.queue = []; this.commitEnd = -1; this.latency = 0.3; this.latHist = [];
+    this.base = 0; // frames dropped from the front of the buffer so far (absolute index = base + local index)
+    this.warps = []; this.warpSeq = 0; this.planYaw = null; this.warpSincePlan = 0; this.sinceChange = 1e6;
+    this.stats = { generations: 0, late: 0, lastLatency: 0, lastTokens: 0, failures: 0, error: '', extended: 0, steering: 0 };
     this.inert = new Inertializer(sk.names.length, 0.07);
     this.feet = new FootLocker(sk, () => ({ on: 0.55, off: 0.35, max: 0.12, blendIn: 0.06, blendOut: 0.1 }));
     this.fingers = new FingerAnimator(sk, this.buffer[0], () => ({ curlIdle: 6, curlWalk: 12, curlRun: this.S().fingerCurlRun,
       follow: this.S().fingerFollow, variation: 3 }));
+    this.look = new LookAt(sk);
+    this.cycleJoints = LEG_ARM.map((n) => sk.names.indexOf(n)).filter((j) => j > 0);
+    this.iR = sk.names.indexOf('RightLeg'); this.iL = sk.names.indexOf('LeftLeg');
     this.display = null; this.prevDisplay = null;
     this.events = []; // e.g. {type:'sit', pos, yaw, seat}
   }
@@ -236,48 +283,60 @@ export class Controller {
     const n = Math.hypot(cmd.move[0], cmd.move[1]);
     return [cmd.move[0] / n * speed * mag, 0, cmd.move[1] / n * speed * mag];
   }
-  simulate(goal, dt) {
+  // spring-damper velocity with acceleration caps (gameplay feel); integrates position
+  step(state, goal, dt) {
     const s = this.S(), hl = s.responsiveness * s.inertia;
-    if (M.vdot(goal, this.simVel) < 0) goal = M.vadd(goal, M.vscale(this.simVel, s.momentum));
-    let [vn, an] = springVelocity(this.simVel, this.simAcc, goal, hl, dt);
-    let dv = M.vsub(vn, this.simVel);
-    const cap = (M.vlen(vn) > M.vlen(this.simVel) ? s.acceleration : s.deceleration) * dt;
+    if (M.vdot(goal, state.v) < 0) goal = M.vadd(goal, M.vscale(state.v, s.momentum));
+    let [vn, an] = springVelocity(state.v, state.a, goal, hl, dt);
+    let dv = M.vsub(vn, state.v);
+    const cap = (M.vlen(vn) > M.vlen(state.v) ? s.acceleration : s.deceleration) * dt;
     if (M.vlen(dv) > cap) { dv = M.vscale(dv, cap / M.vlen(dv)); an = M.vscale(dv, 1 / Math.max(dt, 1e-6)); }
-    this.simVel = M.vadd(this.simVel, dv); this.simAcc = an;
-    this.simPos = M.vadd(this.simPos, M.vscale(this.simVel, dt));
-    if (Math.hypot(this.simVel[0], this.simVel[2]) > 0.3) {
-      const target = Math.atan2(this.simVel[0], this.simVel[2]), err = M.wrap(target - this.simYaw);
-      const y = (4 * LN2 / (s.facingResponsiveness * s.inertia)) / 2, lim = s.turnRate * Math.PI / 180 * dt;
-      this.simYaw = M.wrap(this.simYaw + Math.max(-lim, Math.min(lim, err * (1 - Math.exp(-y * dt)))));
-    }
+    state.v = M.vadd(state.v, dv); state.a = an; state.p = M.vadd(state.p, M.vscale(state.v, dt));
   }
-  predict(horizon, goal) {
-    const s = this.S(), hl = s.responsiveness * s.inertia;
-    let p = this.simPos.slice(), v = this.simVel.slice(), a = this.simAcc.slice();
-    for (let i = 0; i < Math.max(1, Math.round(horizon * FPS)); i++) { [v, a] = springVelocity(v, a, goal, hl, DT); p = M.vadd(p, M.vscale(v, DT)); }
-    const yaw = Math.hypot(goal[0], goal[2]) > 0.3 ? Math.atan2(goal[0], goal[2]) : this.simYaw;
-    return [p, v, yaw];
+  simulate(goal, dt) { // smoothed command velocity (HUD, fingers, replan trigger)
+    const st = { p: this.simPos, v: this.simVel, a: this.simAcc };
+    this.step(st, goal, dt);
+    this.simPos = st.p; this.simVel = st.v; this.simAcc = st.a;
+    if (Math.hypot(this.simVel[0], this.simVel[2]) > 0.3) this.simYaw = Math.atan2(this.simVel[0], this.simVel[2]);
+  }
+  rootState(k) { // position, horizontal velocity and heading of the buffer at local frame k
+    const b = this.buffer, k0 = Math.max(0, k - 2), p = M.P(b[k], 0), q = M.P(b[k0], 0), n = Math.max(1, k - k0);
+    const w = M.fk(b[k], this.sk.parents);
+    return { p: [p[0], 0, p[2]], v: [(p[0] - q[0]) * FPS / n, 0, (p[2] - q[2]) * FPS / n], yaw: headingFromHips(M.P(w, this.iR), M.P(w, this.iL)) };
+  }
+  predictFrom(k, goal, horizon) {
+    const r = this.rootState(k), st = { p: r.p, v: r.v, a: [0, 0, 0] };
+    for (let i = 0; i < Math.max(1, Math.round(horizon * FPS)); i++) this.step(st, goal, DT);
+    const sp = Math.hypot(st.v[0], st.v[2]);
+    const yaw = sp > 0.3 ? Math.atan2(st.v[0], st.v[2]) : r.yaw;
+    return [st.p, st.v, yaw, r];
   }
   groundYaw(pose) {
-    const w = M.fk(pose, this.sk.parents), r = this.sk.names.indexOf('RightLeg'), l = this.sk.names.indexOf('LeftLeg');
+    const w = M.fk(pose, this.sk.parents);
     const h = M.P(w, 0);
-    return [[h[0], 0, h[2]], headingFromHips(M.P(w, r), M.P(w, l))];
+    return [[h[0], 0, h[2]], headingFromHips(M.P(w, this.iR), M.P(w, this.iL))];
   }
   trigger(name) { if (this.actions[name]) { this.queue.push(name); this.framesSincePlan = 1e6; } }
+  noteLatency(lat) { // EMA, but never below the median of the last 8
+    this.latHist.push(lat); if (this.latHist.length > 8) this.latHist.shift();
+    const srt = this.latHist.slice().sort((a, b) => b - a);
+    this.latency = Math.max(0.7 * this.latency + 0.3 * lat, srt[Math.floor(srt.length / 2)]); // late results are inertialized, not frozen
+  }
 
   plan(cmd, goal) {
     const s = this.S(), now = this.frame;
     const lead = Math.ceil(this.latency * FPS) + s.replanLead;
     let k = Math.floor(now) + Math.max(1, lead);
     k = Math.min(Math.max(k, 3), this.buffer.length - 1);
+    if (!this.queue.length) this.presteer(goal, k);
     const context = this.buffer.slice(k - 3, k + 1);
     let allowed = []; for (let t = s.minTokens; t <= s.maxTokens; t++) allowed.push(t);
-    // segment must outlast the measured latency (slow phones) and cover the horizon
+    // the segment must outlast the measured latency; steady input gets long segments (worker stays free)
     const needT = Math.ceil((this.latency * FPS * 1.3 + s.replanLead + 6) / 4);
-    let horizon = s.predictionHorizon;
-    const Th = Math.round((horizon * FPS - (k - now) + 7) / 4);
+    const steady = this.sinceChange > 0.6 && !this.queue.length;
+    const Th = steady ? MAX_TOKENS : Math.round((s.predictionHorizon * FPS - (k - now) + 7) / 4);
     const T = Math.min(MAX_TOKENS, Math.max(s.minTokens, MIN_TOKENS, needT, Th));
-    horizon = ((k - now) + validFrames(T) - 1) / FPS;
+    const horizon = (validFrames(T) - 1) / FPS;
     let target, action = this.queue.shift() || null;
     const a = action ? this.actions[action] : null;
     if (a) {
@@ -288,26 +347,26 @@ export class Controller {
         const lx = Math.cos(-y0) * d[0] + Math.sin(-y0) * d[1], lz = -Math.sin(-y0) * d[0] + Math.cos(-y0) * d[1];
         const fp = [pc[0] + Math.cos(yc) * lx + Math.sin(yc) * lz, 0, pc[2] - Math.sin(yc) * lx + Math.cos(yc) * lz];
         const fyaw = M.wrap(yc + (a.rootk[2] - y0));
-        this.simPos = fp.slice(); this.simVel = [0, 0, 0]; this.simAcc = [0, 0, 0]; this.simYaw = fyaw;
         target = place(win, fp, fyaw);
       } else {
-        const [fp] = this.predict(horizon, goal);
-        target = place(win, fp, this.simYaw);
-        if (action === 'sit') this.events.push({ type: 'sit', pos: fp, yaw: this.simYaw, seat: Math.max(0.3, M.P(target[0], 0)[1] - 0.12) });
+        const [fp, , fyaw] = this.predictFrom(k, goal, horizon);
+        target = place(win, fp, fyaw);
+        if (action === 'sit') this.events.push({ type: 'sit', pos: fp, yaw: fyaw, seat: Math.max(0.3, M.P(target[0], 0)[1] - 0.12) });
       }
       allowed = allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
       if (!allowed.length) allowed = [MAX_TOKENS];
     } else {
-      const [fp, fv, fyaw] = this.predict(horizon, goal);
+      const [fp, fv, fyaw] = this.predictFrom(k, goal, horizon);
       const fwd = [Math.sin(fyaw), Math.cos(fyaw)], right = [fwd[1], -fwd[0]];
       const vl = [fv[0] * right[0] + fv[2] * right[1], fv[0] * fwd[0] + fv[2] * fwd[1]];
       const w = this.lib.match(vl, 0, cmd.gait === 'crouch', s.variation, this.rand);
       target = place(this.lib.windows[w], fp, fyaw);
       allowed = s.durationMode === 'horizon' ? [T] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
     }
-    const info = { k, t0: performance.now(), action };
+    const info = { kAbs: this.base + k, t0: performance.now(), action, warpSeq: this.warpSeq };
     this.pending = true;
     this.framesSincePlan = 0; this.lastGoal = goal.slice();
+    this.planYaw = Math.hypot(goal[0], goal[2]) > 0.5 && !a ? Math.atan2(goal[0], goal[2]) : null; this.warpSincePlan = 0;
     this.generate({ context, target, allowed, anatomical: s.anatomical, velocityMatching: s.velocityMatching })
       .then((res) => this.splice(res, info))
       .catch((e) => { this.stats.failures++; this.stats.error = String(e); })
@@ -316,18 +375,83 @@ export class Controller {
 
   splice(res, info) {
     const lat = (performance.now() - info.t0) / 1000;
-    this.latency = 0.7 * this.latency + 0.3 * lat;
+    this.noteLatency(lat);
     Object.assign(this.stats, { generations: this.stats.generations + 1, lastLatency: lat, lastTokens: res.tokens });
-    const k = info.k, now = this.frame, before = this.display;
-    this.buffer = [...this.buffer.slice(0, k), ...res.frames];
+    const k = info.kAbs - this.base, now = this.frame, before = this.display;
+    if (k < 3 || k > this.buffer.length) return; // stale (cannot happen with one request in flight)
+    let frames = res.frames;
+    for (const w of this.warps) if (w.seq > info.warpSeq) frames = frames.map((f, i) => { const a = warpAngle(w, info.kAbs + i); return a ? rotateFrame(f, w.pivot, a) : f; });
+    this.buffer = [...this.buffer.slice(0, k), ...frames];
     this.contacts = [...this.contacts.slice(0, k), ...res.contacts];
     const drop = Math.max(0, Math.floor(now) - 8);
-    if (drop > 0) { this.buffer = this.buffer.slice(drop); this.contacts = this.contacts.slice(drop); this.time -= drop * DT; this.commitEnd -= drop; }
+    if (drop > 0) { this.buffer = this.buffer.slice(drop); this.contacts = this.contacts.slice(drop); this.time -= drop * DT; this.commitEnd -= drop; this.base += drop; }
+    this.warps = []; // only one request is ever in flight, and it has just been spliced
     if (info.action) this.commitEnd = (k - drop) + res.frames.length - 1 - (this.latency * FPS + this.S().replanLead + 2);
     if (this.frame > k - drop && before) {
       this.stats.late++;
       this.inert.transition(before, this.prevDisplay || before, this.sample(this.time), this.sample(this.time - DT), DT);
     }
+  }
+  // append a copy of the last gait cycle (re-rooted, seam blended) so playback never stalls on a late result
+  extend() {
+    const b = this.buffer, e = b.length - 1, J = this.sk.names.length;
+    let best = -1, bestCost = Infinity;
+    for (let s = Math.max(1, e - 44); s <= e - 14; s++) {
+      let c = 0;
+      for (const j of this.cycleJoints) c += M.vlen(M.qToScaledAxis(M.qmul(M.Q(b[e], j), M.qconj(M.Q(b[s], j)))));
+      const ve = M.vsub(M.P(b[e], 0), M.P(b[e - 1], 0)), vs = M.vsub(M.P(b[s], 0), M.P(b[s - 1], 0));
+      c += 4 * Math.abs(M.vlen(ve) - M.vlen(vs)) * FPS;
+      if (c < bestCost) { bestCost = c; best = s; }
+    }
+    if (best < 0) { b.push(new Float64Array(b[e])); this.contacts.push(this.contacts[e].slice()); return; }
+    const ge = this.groundYaw(b[e]), gs = this.groundYaw(b[best]), dyaw = M.wrap(ge[1] - gs[1]);
+    const seam = [], pe = M.P(b[e], 0), ps = M.P(b[best], 0);
+    const rq0 = M.qmul(M.qYaw(dyaw), M.Q(b[best], 0));
+    seam.push(M.qToScaledAxis(M.qmul(M.Q(b[e], 0), M.qconj(rq0))));
+    for (let j = 1; j < J; j++) seam.push(M.qToScaledAxis(M.qmul(M.Q(b[e], j), M.qconj(M.Q(b[best], j)))));
+    const n = e - best, N = Math.min(10, n);
+    for (let i = 1; i <= n; i++) {
+      const src = b[best + i], out = new Float64Array(src), w = i < N ? (1 - i / N) ** 2 : 0;
+      const p = M.P(src, 0), d = yawRot([p[0] - ps[0], 0, p[2] - ps[2]], dyaw);
+      M.setP(out, 0, [pe[0] + d[0], p[1] + w * (pe[1] - ps[1]), pe[2] + d[2]]);
+      M.setQ(out, 0, M.qnorm(M.qmul(M.qFromScaledAxis(M.vscale(seam[0], w)), M.qmul(M.qYaw(dyaw), M.Q(src, 0)))));
+      if (w > 0) for (let j = 1; j < J; j++) M.setQ(out, j, M.qnorm(M.qmul(M.qFromScaledAxis(M.vscale(seam[j], w)), M.Q(src, j))));
+      b.push(out); this.contacts.push(this.contacts[best + i].slice());
+    }
+    this.stats.extended++;
+  }
+  // rotate the buffered future (frames after the playhead) toward the commanded direction
+  warp(w, record) {
+    const i0 = Math.floor(this.frame);
+    for (let i = i0 + 1; i < this.buffer.length; i++) { const a = warpAngle(w, this.base + i); if (a) this.buffer[i] = rotateFrame(this.buffer[i], w.pivot, a); }
+    if (record) { this.warps.push({ ...w, seq: ++this.warpSeq }); if (this.warps.length > 400) this.warps.shift(); }
+    this.stats.steering += w.total;
+  }
+  movingAt(i) {
+    if (i < 2 || i >= this.buffer.length) return null;
+    const a = M.P(this.buffer[i], 0), c = M.P(this.buffer[i - 2], 0), v = [(a[0] - c[0]) * FPS / 2, (a[2] - c[2]) * FPS / 2];
+    return Math.hypot(v[0], v[1]) >= 0.8 ? Math.atan2(v[0], v[1]) : null;
+  }
+  // input changed while a request is in flight: keep turning the future; the warp is replayed on its result
+  steer(goal, dt) {
+    const s = this.S(), rate = (s.steering ?? 200) * Math.PI / 180;
+    if (rate <= 0 || this.planYaw === null || Math.hypot(goal[0], goal[2]) < 0.5 || this.movingAt(Math.floor(this.frame)) === null) return;
+    const err = M.wrap(Math.atan2(goal[0], goal[2]) - (this.planYaw + this.warpSincePlan));
+    if (Math.abs(err) < 0.05) return;
+    const maxW = 90 * Math.PI / 180, step = Math.max(-rate * dt, Math.min(rate * dt, err));
+    const d = Math.max(-maxW, Math.min(maxW, this.warpSincePlan + step)) - this.warpSincePlan;
+    if (Math.abs(d) < 1e-6) return;
+    this.warp({ pivot: M.P(this.sample(this.time), 0), total: Math.abs(d), rate: Infinity, sign: Math.sign(d), startAbs: this.base + Math.floor(this.frame) + 0.5 }, true);
+    this.warpSincePlan += d;
+  }
+  // at plan time: start turning now, so the motion until the new segment begins already heads the right way
+  presteer(goal, k) {
+    const s = this.S(), rate = (s.steering ?? 200) * Math.PI / 180, hk = this.movingAt(k);
+    if (rate <= 0 || hk === null || Math.hypot(goal[0], goal[2]) < 0.5 || this.movingAt(Math.floor(this.frame)) === null) return;
+    const err = M.wrap(Math.atan2(goal[0], goal[2]) - hk);
+    if (Math.abs(err) < 0.05 || Math.abs(err) > 135 * Math.PI / 180) return; // reversals are left to the model
+    const total = Math.min(Math.abs(err), rate * (k - this.frame) / FPS, 90 * Math.PI / 180);
+    this.warp({ pivot: M.P(this.sample(this.time), 0), total, rate, sign: Math.sign(err), startAbs: this.base + this.frame }, false);
   }
   sample(t) {
     const f = Math.min(Math.max(t * FPS, 0), this.buffer.length - 1), i0 = Math.floor(f), i1 = Math.min(i0 + 1, this.buffer.length - 1);
@@ -343,20 +467,26 @@ export class Controller {
     if (cmd.action) this.trigger(cmd.action);
     const goal = this.goalVelocity(cmd);
     this.simulate(goal, dt);
-    const remaining = this.buffer.length - 1 - this.frame;
     const changed = M.vlen(M.vsub(goal, this.lastGoal)) > s.inputReplanThreshold;
+    this.sinceChange = changed ? 0 : this.sinceChange + dt;
+    const remaining = this.buffer.length - 1 - this.frame;
     const committed = this.frame < this.commitEnd;
-    const need = remaining < this.latency * FPS + s.replanLead + 2 ||
-      (!committed && (this.framesSincePlan >= s.replanInterval || (changed && this.framesSincePlan >= 2) || this.queue.length));
+    const low = remaining < this.latency * FPS * 1.15 + s.replanLead + 4;
+    const fresh = this.sinceChange < 0.6 && this.framesSincePlan >= s.replanInterval; // keep refining right after input changes
+    const need = low || (!committed && ((changed && this.framesSincePlan >= 2) || fresh || this.queue.length));
     if (need && !this.pending) this.plan(cmd, goal);
+    if (!committed) this.steer(goal, dt);
     this.inert.halflife = Math.max(s.transitionDuration / 2.5, 1e-3);
+    while (this.buffer.length - 1 - (this.frame + dt * s.playbackRate * FPS) < 2) this.extend();
     this.time = Math.min(this.time + dt * s.playbackRate, (this.buffer.length - 1) * DT);
     this.framesSincePlan += dt * FPS; // game frames, independent of the render rate
     let pose = this.sample(this.time);
+    this.simPos = M.P(pose, 0);
     if (this.inert.active) pose = this.inert.apply(pose, dt);
     if (s.footLocking) pose = this.feet.apply(pose, this.sampleContacts(this.time), dt);
     if (s.anatomical) pose = applyLimits(this.limits, pose);
     if (s.fingers) pose = this.fingers.apply(pose, Math.hypot(this.simVel[0], this.simVel[2]), dt);
+    if (s.lookAt ?? true) pose = this.look.apply(pose, goal, dt, 70);
     if (s.smoothing > 0 && this.display) {
       const alpha = 1 - Math.pow(s.smoothing, dt * 30), out = new Float64Array(pose);
       for (let j = 1; j < this.sk.names.length; j++) M.setQ(out, j, M.qSlerp(M.Q(this.display, j), M.Q(pose, j), alpha));
