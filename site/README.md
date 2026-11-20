@@ -114,6 +114,26 @@ Procedural, in the vertex shader (the model and the mocap contain no muscle or b
   driven by their bone's acceleration (footfalls, landings), up to 5 mm.
 - **Skin**: physically based material with a soft sheen at grazing angles.
 
+## Fighting
+
+Punch (J / Punch button: jab, cross, hook, uppercut in turn), Kick (K: front kick, roundhouse) and
+Block (L). Each move is a hand-built key pose (made by IK on the mocap idle pose: guard, extended
+arm, chambered and extended leg, forearms up) that the SOMA network moves into from the current
+motion and back out of to the stance; from standing (and jab / cross / front kick from walking)
+they are in the instant-transition bank, otherwise they are generated live.
+
+## Animals
+
+Settings, Character: Dog, Wolf, Fox, Cat, Horse, Deer, Bear, Elephant, Rabbit, Lion (or "Play an
+animal" on the start screen, no model download). The SOMA network only knows human motion, so the
+animals are procedural: walk / trot / gallop foot patterns (hopping for the rabbit) blended by
+speed, planted feet with swing arcs, two-bone leg IK with species joint directions and a folding
+foot segment, a spine that bends into turns and flexes in the gallop, a head that looks where it
+is going and scans when idle, spring-driven tails (wagging), ear flicks and breathing. Buttons
+map to species actions: jump, attack (bite / paw swipe / rear up / charge), kick (pounce / buck /
+stomp), block (defensive crouch), dodge (side-step), sit, lie down (Duck), stalk (Crouch), gallop
+(Sprint). Bodies are built from smooth primitives at runtime.
+
 ## Slow devices (phones)
 
 - **No catch-up lurches**: targets are predicted from the animation's own momentum, never from a
@@ -123,6 +143,11 @@ Procedural, in the vertex shader (the model and the mocap contain no muscle or b
 - **Free worker**: while the input is steady, segments are long and replanned only when the
   buffer runs low.
 - The joystick switches walk/run with hysteresis, so a wobbling thumb does not flip the gait.
+- **Feet**: soft foot locking. A planted foot stays where it landed but the hold point follows the
+  animated foot within 2.5 cm, planting needs a slow foot as well as the model's contact, and a
+  released foot carries its offset while the lock fades (the earlier version pulled the foot back
+  toward its old spot during the fade: up to 18 cm in this test, the "legs stuck, then pop back"
+  glitch). Blends after an instant transition are softer (0.14 s half-life).
 
 ## Performance (measured here, not on phones)
 
@@ -192,6 +217,8 @@ js/controller.js        planning, splicing, instant transitions, gait-cycle exte
 js/library.js           continuous mocap clips with stride phase (target selection)
 js/bank.js              transition bank + motion-matching features
 js/body.js              muscles, breathing, soft tissue (vertex shader)
+js/fight.js             fighting key poses (IK on the idle pose)
+js/animals.js           procedural animals (10 species)
 js/settings.js          presets and defaults
 js/codec.js             SOMA encode/decode, endpoint correction, velocity matching, joint limits
 js/math3d.js            quaternion and pose helpers

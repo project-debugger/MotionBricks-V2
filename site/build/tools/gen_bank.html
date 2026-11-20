@@ -9,6 +9,7 @@ import { bindLimits, JOINT_NAMES } from '../../js/codec.js';
 import { DEFAULTS } from '../../js/settings.js';
 import { Controller, Library } from '../../js/controller.js';
 import { ClipLibrary, legState } from '../../js/library.js';
+import { registerFightActions, FIGHT_MOVES } from '../../js/fight.js';
 
 const q = new URLSearchParams(location.search), modelKey = q.get('model') || 'balanced', limit = +(q.get('limit') || 0);
 const BASE = new URL('../../', location.href).href;
@@ -19,6 +20,7 @@ try {
     getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('models/models.json')]);
   const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
   const limits = bindLimits(lim, sk), lib = new Library(sk, wmeta, wbin), clips = new ClipLibrary(sk, cmeta, cbin, limits), J = sk.names.length;
+  registerFightActions(sk, lib, wmeta.actions, limits);
   const S = { ...DEFAULTS, variation: 0 };
   const worker = new Worker(new URL('../../js/worker.js', import.meta.url), { type: 'module' });
   let nextId = 1; const waiting = new Map(); let readyResolve; const ready = new Promise((r) => { readyResolve = r; });
@@ -76,6 +78,8 @@ try {
   add('run', [{ gait: 'run', dir: null }, ...mv('run', D7), ...mv('walk', [0]), ...mv('sprint', [0, 45, -45]), ...['jump', 'dodge', 'duck'].map((a) => ({ action: a, then: { gait: 'run', dir: 0 } }))]);
   add('sprint', [{ gait: 'sprint', dir: null }, ...mv('sprint', [45, -45, 90, -90, 180]), ...mv('run', [0]), { action: 'jump', then: { gait: 'sprint', dir: 0 } }]);
   add('crouch', [{ gait: 'crouch', dir: null }, ...mv('crouch', D7)]);
+  add('idle', FIGHT_MOVES.map((a) => ({ action: a, then: { gait: 'run', dir: null } })));
+  for (const c of ctx.walk.slice(0, 2)) for (const a of ['jab', 'cross', 'front_kick']) plans.push(['walk', c, { action: a, then: { gait: 'walk', dir: 0 } }]);
   const todo = limit ? plans.slice(0, limit) : plans;
   log(`planned ${todo.length} transitions`);
 

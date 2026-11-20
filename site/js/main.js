@@ -7,6 +7,8 @@ import { Controller, Library } from './controller.js';
 import { ClipLibrary, legIndices } from './library.js';
 import { TransitionBank } from './bank.js';
 import { BodyFX } from './body.js';
+import { registerFightActions } from './fight.js';
+import { Animal, SPECIES, SPECIES_KEYS } from './animals.js';
 import { PRESETS, DEFAULTS } from './settings.js';
 
 const $ = (s) => document.querySelector(s);
@@ -85,7 +87,7 @@ function buildScene(mesh) {
   };
   const resize = () => { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); };
   addEventListener('resize', resize); resize();
-  return { renderer, scene, camera, bones, sun, chair, landmarks, geo, inverses, skin };
+  return { renderer, scene, camera, bones, sun, chair, landmarks, geo, inverses, skin, body };
 }
 
 // ------------------------------------------------------------------ input
@@ -94,8 +96,9 @@ function setupInput(canvas) {
   addEventListener('keydown', (e) => {
     if (e.target.closest && e.target.closest('#panel')) return;
     input.keys.add(e.code);
-    const a = { Space: 'jump', KeyF: 'dodge', KeyX: 'duck' }[e.code];
-    if (a && !e.repeat) input.pending.push(a);
+    const am = { Space: () => 'jump', KeyF: () => 'dodge', KeyX: () => 'duck', KeyJ: nextPunch, KeyK: nextKick, KeyL: () => 'block' }[e.code];
+    const a = am && !e.repeat ? am() : null;
+    if (a) input.pending.push(a);
     if (e.code === 'KeyC' && !e.repeat) toggleCrouch();
     if (e.code === 'KeyZ' && !e.repeat) { input.walk = !input.walk; }
     if (e.code === 'KeyE' && !e.repeat) toggleSit();
@@ -129,9 +132,16 @@ function setupInput(canvas) {
   $('#b-jump').addEventListener('pointerdown', () => input.pending.push('jump'));
   $('#b-dodge').addEventListener('pointerdown', () => input.pending.push('dodge'));
   $('#b-duck').addEventListener('pointerdown', () => input.pending.push('duck'));
+  $('#b-punch').addEventListener('pointerdown', () => input.pending.push(nextPunch()));
+  $('#b-kick').addEventListener('pointerdown', () => input.pending.push(nextKick()));
+  $('#b-block').addEventListener('pointerdown', () => input.pending.push('block'));
   $('#b-crouch').addEventListener('pointerdown', toggleCrouch);
   $('#b-sit').addEventListener('pointerdown', toggleSit);
 }
+let punchN = 0, kickN = 0;
+const PUNCHES = ['jab', 'cross', 'hook', 'uppercut'], KICKS = ['front_kick', 'roundhouse'];
+function nextPunch() { return PUNCHES[punchN++ % PUNCHES.length]; }
+function nextKick() { return KICKS[kickN++ % KICKS.length]; }
 function toggleCrouch() { input.crouch = !input.crouch; $('#b-crouch').classList.toggle('on', input.crouch); }
 function toggleSit() { input.pending.push(input.sitting ? 'stand_up' : 'sit'); input.sitting = !input.sitting; input.sitT = 0; $('#b-sit').classList.toggle('on', input.sitting); }
 
@@ -175,10 +185,13 @@ const SLIDERS = [
 ];
 const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomical joint limits'], ['fingers', 'Procedural fingers'], ['velocityMatching', 'Velocity-matched joins'], ['lookAt', 'Head leads turns'],
   ['instant', 'Instant response (pre-generated SOMA transitions)'], ['bodyFX', 'Muscles, breathing and soft tissue']];
-function buildPanel(models, onModel) {
+function buildPanel(models, onModel, onCharacter) {
   const p = $('#panel-body');
+  const crow = [['human', 'Human', 'SOMA network'], ...SPECIES_KEYS.map((k) => [k, SPECIES[k].name, 'procedural'])].map(([k, n, sub]) => `<button class="seg" data-char="${k}">${n}<small>${sub}</small></button>`).join('');
   const mrow = Object.entries(models).map(([k, m]) => `<button class="seg" data-model="${k}" ${m.available ? '' : 'disabled'}>${m.short}<small>${(m.bytes / 1e6).toFixed(0)} MB</small></button>`).join('');
-  p.innerHTML = `<h3>Model</h3><div class="segs" id="models">${mrow}</div>
+  p.innerHTML = `<h3>Character</h3><div class="segs" id="chars">${crow}</div>
+    <p class="note" style="margin-top:6px">Animals are animated by a procedural gait system: the SOMA network only knows human motion.</p>
+    <h3>Model</h3><div class="segs" id="models">${mrow}</div>
     <h3>Preset</h3><div class="segs" id="presets">${Object.keys(PRESETS).map((k) => `<button class="seg" data-preset="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
     <h3>Tuning</h3>${SLIDERS.map(([k, l, a, b, st, u]) => `<label class="sl"><span>${l} <b id="v-${k}"></b></span><input id="s-${k}" type="range" min="${a}" max="${b}" step="${st}" data-unit="${u}"></label>`).join('')}
     <h3>Quality passes</h3>${TOGGLES.map(([k, l]) => `<label class="tg"><input id="t-${k}" type="checkbox"><span>${l}</span></label>`).join('')}
@@ -186,6 +199,7 @@ function buildPanel(models, onModel) {
     <button class="reset" id="reset">Reset to defaults</button>`;
   const sync = () => {
     p.querySelectorAll('[data-model]').forEach((b) => b.classList.toggle('on', b.dataset.model === S.model));
+    p.querySelectorAll('[data-char]').forEach((b) => b.classList.toggle('on', b.dataset.char === (S.character || 'human')));
     p.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b.dataset.preset === S.preset));
     for (const [k] of SLIDERS) { const el = $(`#s-${k}`); el.value = S[k]; $(`#v-${k}`).textContent = `${(+S[k]).toFixed(el.step < 1 ? 2 : 0)} ${el.dataset.unit}`; }
     for (const [k] of TOGGLES) $(`#t-${k}`).checked = !!S[k];
@@ -202,7 +216,8 @@ function buildPanel(models, onModel) {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.preset) { Object.assign(S, PRESETS[b.dataset.preset]); S.preset = b.dataset.preset; }
     if (b.dataset.model && b.dataset.model !== S.model) { S.model = b.dataset.model; onModel(S.model); }
-    if (b.id === 'reset') S = { ...DEFAULTS, model: S.model };
+    if (b.dataset.char) onCharacter(b.dataset.char);
+    if (b.id === 'reset') S = { ...DEFAULTS, model: S.model, character: S.character };
     save(); sync();
   });
   sync();
@@ -217,6 +232,7 @@ async function main() {
     getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('data/bank.json'), getBin('data/bank.bin')]);
   const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
   const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk);
+  const fightPoses = registerFightActions(sk, lib, wmeta.actions, limits);
   status('Indexing mocap strides and the instant-transition bank...');
   await new Promise((r) => setTimeout(r, 0));
   const clips = new ClipLibrary(sk, cmeta, cbin, limits), bank = new TransitionBank(sk, bmeta, bbin, limits, legIndices(sk));
@@ -253,7 +269,7 @@ async function main() {
   };
   const loadModel = (key) => {
     ready = false; $('#loading').hidden = false; $('#bar').style.width = '0%';
-    $('#start').hidden = true; $('#go').hidden = true;
+    $('#start').hidden = true; $('#go').hidden = true; $('#go-animal').hidden = true;
     worker.postMessage({ type: 'load', base: BASE + 'models/', model: key, info: models.models[key], skeleton: sk, jointLimits: lim,
       threads: Math.min(4, navigator.hardwareConcurrency || 2) });
   };
@@ -261,8 +277,30 @@ async function main() {
     const id = nextId++; waiting.set(id, { resolve, reject });
     worker.postMessage({ type: 'generate', id, ...req });
   });
-  buildPanel(MODELS, loadModel);
   const ctrl = new Controller({ sk, lib, clips, bank, limits, settings: () => S, generate, actions: wmeta.actions });
+  // characters: the SOMA human, or a procedural animal standing where the current character is
+  const animals = {}; let animal = null, modelRequested = false;
+  const focus = () => (animal ? [animal.pos.x, animal.pos.z, animal.yaw] : (() => { const w = M.fk(ctrl.display || ctrl.buffer[3], sk.parents); return [w[0], w[2], ctrl.simYaw]; })());
+  const setCharacter = (key) => {
+    const [fx, fz, fyaw] = focus();
+    S.character = key; save();
+    if (animal) animal.setVisible(false);
+    if (key === 'human') {
+      animal = null; R.body.visible = true;
+      const w = M.fk(ctrl.display || ctrl.buffer[3], sk.parents); ctrl.teleport(fx - w[0], fz - w[2]);
+      $('#hud-model').textContent = ready ? MODELS[S.model].label : 'SOMA network';
+      if (!ready && !modelRequested) { $('#loading').hidden = false; $('#start').hidden = false; $('#go').hidden = false; }
+    } else {
+      R.body.visible = false; R.chair.visible = false;
+      animal = animals[key] || (animals[key] = new Animal(THREE, R.scene, key));
+      animal.pos.set(fx, 0, fz); animal.yaw = fyaw; animal.speed = 0; animal.placeFeet(); animal.tailPrev = null; animal.mode = 'stand'; animal.setVisible(true);
+      input.sitting = false; $('#b-sit').classList.remove('on');
+      $('#hud-model').textContent = `${SPECIES[key].name} - procedural animal`;
+      $('#loading').hidden = true;
+    }
+    document.body.classList.toggle('animal', !!animal);
+  };
+  buildPanel(MODELS, (k) => { modelRequested = true; loadModel(k); }, setCharacter);
 
   // start screen: pick a model, then download
   const startRow = $('#start-models');
@@ -270,7 +308,9 @@ async function main() {
   startRow.addEventListener('click', (e) => { const b = e.target.closest('[data-start]'); if (!b) return; S.model = b.dataset.start; save(); startRow.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); });
   $('#start').hidden = false;
   status(`The real SOMA network runs on this device. First download: about ${(models.models[S.model].bytes / 1e6).toFixed(0)} MB.`);
-  $('#go').addEventListener('click', () => { loadModel(S.model); });
+  $('#go').addEventListener('click', () => { modelRequested = true; loadModel(S.model); });
+  $('#go-animal').addEventListener('click', () => { $('#panel').hidden = false; setCharacter(S.character && S.character !== 'human' ? S.character : 'dog'); });
+  if (S.character && S.character !== 'human' && SPECIES[S.character]) setCharacter(S.character);
 
   $('#gear').addEventListener('click', () => { $('#panel').hidden = !$('#panel').hidden; });
   $('#close').addEventListener('click', () => { $('#panel').hidden = true; });
@@ -282,6 +322,22 @@ async function main() {
   function frame(now) {
     const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now; // stays real-time down to 10 fps
     let pose;
+    if (animal) {
+      if (!window.SOMA_FREEZE) animal.update(command(dt), dt);
+      const t = animal.target, k = 1 - Math.exp(-dt * 6), sc = Math.min(2.6, Math.max(0.28, animal.size / 0.85));
+      camT.x += (t.x - camT.x) * k; camT.z += (t.z - camT.z) * k;
+      const d = input.camDist * sc;
+      R.camera.position.set(camT.x + Math.sin(input.camYaw) * d, t.y + 0.35 * sc + d * 0.12, camT.z + Math.cos(input.camYaw) * d);
+      R.camera.lookAt(camT.x, t.y * 0.85, camT.z);
+      R.sun.position.set(t.x + 3.5 * sc, 7.5 * sc, t.z + 2.5 * sc); R.sun.target.position.set(t.x, 0, t.z);
+      R.sun.shadow.camera.left = R.sun.shadow.camera.bottom = -4 * sc; R.sun.shadow.camera.right = R.sun.shadow.camera.top = 4 * sc; R.sun.shadow.camera.updateProjectionMatrix();
+      R.renderer.render(R.scene, R.camera);
+      fpsAcc += dt; fpsN++;
+      if (fpsAcc > 0.5) { $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps`; $('#hud-speed').textContent = `${animal.speed.toFixed(1)} m/s`; fpsAcc = 0; fpsN = 0; }
+      window.SOMA_STATE = { ready, animal: animal.key, speed: animal.speed, pos: [animal.pos.x, animal.pos.z], action: animal.action ? animal.action.name : null, mode: animal.mode };
+      requestAnimationFrame(frame); return;
+    }
+    if (R.sun.shadow.camera.left !== -4) { R.sun.shadow.camera.left = R.sun.shadow.camera.bottom = -4; R.sun.shadow.camera.right = R.sun.shadow.camera.top = 4; R.sun.shadow.camera.updateProjectionMatrix(); }
     if (ready && !window.SOMA_FREEZE) pose = ctrl.update(command(dt), dt);
     else if (ready) pose = ctrl.display;
     else pose = ctrl.display || ctrl.buffer[3];
@@ -321,6 +377,6 @@ async function main() {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX };
+  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, get animal() { return animal; } };
 }
 main().catch((e) => { $('#status').textContent = `Error: ${e.message}`; console.error(e); });

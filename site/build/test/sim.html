@@ -65,7 +65,7 @@ const rec = [];
 const iR = sk.names.indexOf('RightLeg'), iL = sk.names.indexOf('LeftLeg');
 let prevPose = null, t0 = performance.now(), last = t0, clampedFrames = 0;
 const updMs = []; let nanFrames = 0, firstNaN = null; const spikes = [], events = []; let lastGen = 0, lastInst = 0, lastLate = 0;
-const JNAMES = ['Hips', 'Chest', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightArm', 'RightForeArm', 'RightHand', 'LeftFoot', 'RightFoot', 'Head'], jrec = [];
+const JNAMES = ['Hips', 'Chest', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightArm', 'RightForeArm', 'RightHand', 'LeftFoot', 'RightFoot', 'Head', 'LeftToeBase', 'RightToeBase'], jrec = [], legrec = [];
 await new Promise((done) => {
   function frame(now) {
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
@@ -100,6 +100,9 @@ await new Promise((done) => {
     if (maxRot > 30 && spikes.length < 40) spikes.push([+t.toFixed(2), sk.names[maxJ], +maxRot.toFixed(0), ctrl.stats.instant, ctrl.stats.generations]);
     prevPose = pose;
     rec.push({ t, dt, x: w[0], z: w[2], y: w[1], yaw: headingFromHips(M.P(w, iR), M.P(w, iL)), goal: c[1] ? [c[1][0] * gaitSpeed[c[2]], c[1][1] * gaitSpeed[c[2]]] : [0, 0], atEnd, maxRot });
+    if (q.has('joints') && ctrl.lastStages) { const ws = M.fk(ctrl.lastStages.sample, sk.parents), lf = sk.names.indexOf('LeftFoot'), rf = sk.names.indexOf('RightFoot');
+      const wi = M.fk(ctrl.lastStages.inert, sk.parents), wf = M.fk(ctrl.lastStages.feet, sk.parents);
+      legrec.push([...M.P(ws, lf), ...M.P(ws, rf), M.vlen(M.vsub(M.P(wi, 0), M.P(ws, 0))), M.vlen(M.vsub(M.P(wf, lf), M.P(wi, lf))), M.vlen(M.vsub(M.P(wf, rf), M.P(wi, rf))), ctrl.stats.instant, ctrl.stats.late, ctrl.feet.locked[0] ? 1 : 0, ctrl.feet.locked[1] ? 1 : 0, +ctrl.feet.weight[0].toFixed(2), +ctrl.feet.weight[1].toFixed(2), ...ctrl.sampleContacts(ctrl.time).map((x) => +x.toFixed(2))].map((v) => +(+v).toFixed(4))); }
     if (q.has('joints')) jrec.push(JNAMES.map((n) => { const j = sk.names.indexOf(n); return [w[j * 7], w[j * 7 + 1], w[j * 7 + 2]]; }).flat().map((v) => +v.toFixed(4)));
     requestAnimationFrame(frame);
   }
@@ -158,6 +161,6 @@ window.RESULT = {
   perJoint: Object.fromEntries(Object.entries(pj).map(([k, v]) => { const a = v.slice().sort((x, y) => x - y); return [k, [+a[Math.floor(a.length * 0.99)].toFixed(1), +a[a.length - 1].toFixed(1)]]; })), rotNaN: rec.filter((r) => !Number.isFinite(r.maxRot)).length, freezeSeconds: +freezeT.toFixed(2), lurchSeconds: +lurchT.toFixed(2), surgeSeconds: +surgeT.toFixed(2),
   maxSpeed: +Math.max(...speed.slice(sm)).toFixed(2), jointRadPerSecP99: +pct(rots, 0.99).toFixed(1), jointRadPerSecMax: +rots[rots.length - 1].toFixed(1),
   updateMsP50: +pct(updMs.slice().sort((a, b) => a - b), 0.5).toFixed(2), updateMsP99: +pct(updMs.slice().sort((a, b) => a - b), 0.99).toFixed(2),
-  responseSeconds: resp, joints: q.has('joints') ? { names: JNAMES, t: rec.map((r) => +r.t.toFixed(3)), w: jrec } : undefined, trace: q.has('trace') ? rec.map((r, i) => [+r.t.toFixed(3), +r.x.toFixed(3), +r.z.toFixed(3), +speed[i].toFixed(2), r.atEnd ? 1 : 0]) : undefined,
+  responseSeconds: resp, joints: q.has('joints') ? { names: JNAMES, t: rec.map((r) => +r.t.toFixed(3)), w: jrec, legs: legrec } : undefined, trace: q.has('trace') ? rec.map((r, i) => [+r.t.toFixed(3), +r.x.toFixed(3), +r.z.toFixed(3), +speed[i].toFixed(2), r.atEnd ? 1 : 0]) : undefined,
 };
 </script>

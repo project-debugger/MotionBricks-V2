@@ -93,7 +93,7 @@ class Inertializer {
   }
 }
 
-function twoBoneIK(local, world, sk, hip, knee, ankle, target, weight) {
+export function twoBoneIK(local, world, sk, hip, knee, ankle, target, weight) {
   const a = M.P(world, hip), b = M.P(world, knee), c = M.P(world, ankle);
   const t = [c[0] + (target[0] - c[0]) * weight, c[1] + (target[1] - c[1]) * weight, c[2] + (target[2] - c[2]) * weight];
   const eps = 1e-5, lab = M.vlen(M.vsub(b, a)), lcb = M.vlen(M.vsub(b, c));
@@ -124,11 +124,14 @@ function twoBoneIK(local, world, sk, hip, knee, ankle, target, weight) {
   return out;
 }
 
+// Soft foot locking: a planted foot is held where it landed, but the hold point drifts after the
+// animated foot so the IK never drags more than a few centimetres; release blends out smoothly.
+// Planting needs both the model's contact and a slow-moving foot (no locking a sliding swing foot).
 class FootLocker {
   constructor(sk, s) {
     this.sk = sk; this.s = s;
     this.chains = [['LeftLeg', 'LeftShin', 'LeftFoot', 0], ['RightLeg', 'RightShin', 'RightFoot', 2]].map(([a, b, c, ci]) => [sk.names.indexOf(a), sk.names.indexOf(b), sk.names.indexOf(c), ci]);
-    this.locked = [false, false]; this.lockPos = [[0, 0, 0], [0, 0, 0]]; this.weight = [0, 0];
+    this.locked = [false, false]; this.lockPos = [[0, 0, 0], [0, 0, 0]]; this.weight = [0, 0]; this.wv = [0, 0]; this.prev = [null, null]; this.relOff = [[0, 0, 0], [0, 0, 0]];
     this.order = [];
     for (const [hip, knee, ankle] of this.chains) {
       const path = []; let j = hip;
@@ -136,6 +139,7 @@ class FootLocker {
       for (const x of [...path.reverse(), knee, ankle]) if (!this.order.includes(x)) this.order.push(x);
     }
   }
+  reset() { this.locked = [false, false]; this.weight = [0, 0]; this.wv = [0, 0]; this.prev = [null, null]; }
   apply(local, contacts, dt) {
     const s = this.s(), world = new Float64Array(local.length);
     for (const j of this.order) {
@@ -146,11 +150,21 @@ class FootLocker {
     }
     let out = local;
     this.chains.forEach(([hip, knee, ankle, ci], i) => {
-      const c = contacts[ci], pos = M.P(world, ankle);
-      if (!this.locked[i] && c >= s.on) { this.locked[i] = true; this.lockPos[i] = pos.slice(); }
-      else if (this.locked[i] && (c <= s.off || M.vlen(M.vsub(this.lockPos[i], pos)) > s.max)) this.locked[i] = false;
-      const rate = dt / Math.max(this.locked[i] ? s.blendIn : s.blendOut, 1e-4);
-      this.weight[i] = Math.min(1, Math.max(0, this.weight[i] + (this.locked[i] ? rate : -rate)));
+      const c = contacts[ci], pos = M.P(world, ankle), pv = this.prev[i];
+      const hsp = pv && dt > 0 ? Math.hypot(pos[0] - pv[0], pos[2] - pv[2]) / dt : 0;
+      this.prev[i] = pos;
+      if (!this.locked[i] && c >= s.on && hsp < s.plantSpeed) { this.locked[i] = true; this.lockPos[i] = pos.slice(); }
+      else if (this.locked[i] && (c <= s.off || hsp > 2.5 * s.plantSpeed)) { this.locked[i] = false; this.relOff[i] = M.vsub(this.lockPos[i], pos); }
+      if (!this.locked[i]) this.lockPos[i] = M.vadd(pos, this.relOff[i]); // fading out: carry the release offset with the moving foot
+      if (this.locked[i]) { // hold horizontally, follow the animated height (heel/toe roll stays natural)
+        const lp = this.lockPos[i], dx = pos[0] - lp[0], dz = pos[2] - lp[2], d = Math.hypot(dx, dz);
+        if (d > s.maxDrift) { const k = 1 - s.maxDrift / d; lp[0] += dx * k; lp[2] += dz * k; }
+        lp[1] = pos[1];
+      }
+      // critically damped weight (no linear ramps -> no visible kinks)
+      const goal = this.locked[i] ? 1 : 0, hl = this.locked[i] ? s.blendIn : s.blendOut;
+      [this.weight[i], this.wv[i]] = damperDecay(this.weight[i] - goal, this.wv[i], hl, dt); this.weight[i] += goal;
+      this.weight[i] = Math.min(1, Math.max(0, this.weight[i]));
       if (this.weight[i] > 1e-3) out = twoBoneIK(out, world, this.sk, hip, knee, ankle, this.lockPos[i], this.weight[i]);
     });
     return out;
@@ -269,7 +283,7 @@ export class Controller {
     this.warps = []; this.warpSeq = 0; this.planYaw = null; this.warpSincePlan = 0; this.sinceChange = 1e6;
     this.stats = { generations: 0, late: 0, lastLatency: 0, lastTokens: 0, failures: 0, error: '', extended: 0, steering: 0, discarded: 0, instant: 0 };
     this.inert = new Inertializer(sk.names.length, 0.07);
-    this.feet = new FootLocker(sk, () => ({ on: 0.55, off: 0.35, max: 0.12, blendIn: 0.06, blendOut: 0.1 }));
+    this.feet = new FootLocker(sk, () => ({ on: 0.55, off: 0.35, maxDrift: 0.025, plantSpeed: 0.9, blendIn: 0.05, blendOut: 0.09 }));
     this.fingers = new FingerAnimator(sk, this.buffer[0], () => ({ curlIdle: 6, curlWalk: 12, curlRun: this.S().fingerCurlRun,
       follow: this.S().fingerFollow, variation: 3 }));
     this.look = new LookAt(sk);
@@ -279,6 +293,13 @@ export class Controller {
     this.events = []; // e.g. {type:'sit', pos, yaw, seat}
   }
   get frame() { return this.time * FPS; }
+  // move the whole motion (e.g. when switching back from an animal at another place)
+  teleport(dx, dz) {
+    if (Math.abs(dx) + Math.abs(dz) < 1e-6) return;
+    this.buffer = this.buffer.map((f) => { const o = new Float64Array(f); o[0] += dx; o[2] += dz; return o; });
+    this.epoch++; this.feet.reset(); this.display = null; this.prevDisplay = null; this.baseOut = null; this.basePrev = null; this.legCache = new WeakMap();
+    this.simPos = [this.simPos[0] + dx, this.simPos[1], this.simPos[2] + dz];
+  }
   goalVelocity(cmd) {
     const s = this.S(), speed = { walk: s.walkSpeed, run: s.runSpeed, sprint: s.sprintSpeed, crouch: s.crouchSpeed }[cmd.gait] ?? s.runSpeed;
     const mag = Math.min(1, Math.hypot(cmd.move[0], cmd.move[1]));
@@ -397,7 +418,7 @@ export class Controller {
     this.buffer = [...this.buffer.slice(0, i0 - 1), ...frames];
     this.contacts = [...this.contacts.slice(0, i0 - 1), ...contacts];
     if (before) this.inert.transition(this.baseOut || before, this.basePrev || this.baseOut || before, this.sample(this.time), this.sample(this.time - DT), DT);
-    this.epoch++; this.warps = []; this.planYaw = null; this.warpSincePlan = 0;
+    this.epoch++; this.warps = []; this.planYaw = null; this.warpSincePlan = 0; this.softBlend = 0.45;
     this.framesSincePlan = 1e6; this.sinceChange = 0; this.queue = [];
     this.commitEnd = e.action ? (i0 - 1) + frames.length - 1 - (this.latency * FPS + this.S().replanLead + 2) : -1;
     this.stats.instant++;
@@ -431,7 +452,7 @@ export class Controller {
         target = place(win, fp, fyaw);
         if (action === 'sit' && forceT === null) this.events.push({ type: 'sit', pos: fp, yaw: fyaw, seat: Math.max(0.3, M.P(target[0], 0)[1] - 0.12) });
       }
-      allowed = forceT ? [forceT] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
+      allowed = forceT ? [forceT] : a.fight ? [Math.max(MIN_TOKENS, Math.min(needT, 8)), Math.max(MIN_TOKENS, Math.min(needT, 8)) + 1] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
       if (!allowed.length) allowed = [MAX_TOKENS];
     } else {
       const [fp, fv, fyaw] = this.predictFrom(k, goal, horizon);
@@ -599,7 +620,8 @@ export class Controller {
     const need = low || (!committed && ((changed && this.framesSincePlan >= 2) || fresh || this.queue.length));
     if (need && !this.pending) this.plan(cmd, goal);
     if (!committed) this.steer(goal, dt);
-    this.inert.halflife = Math.max(s.transitionDuration / 2.5, 1e-3);
+    this.softBlend = Math.max(0, (this.softBlend || 0) - dt);
+    this.inert.halflife = Math.max(s.transitionDuration / 2.5, this.softBlend > 0 ? 0.14 : 0, 1e-3); // softer blend right after an instant transition
     while (this.buffer.length - 1 - (this.frame + dt * s.playbackRate * FPS) < 2) this.extend();
     this.time = Math.min(this.time + dt * s.playbackRate, (this.buffer.length - 1) * DT);
     this.framesSincePlan += dt * FPS; // game frames, independent of the render rate
