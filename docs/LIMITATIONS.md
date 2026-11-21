@@ -77,6 +77,16 @@
   Tripo AI generation was set up but not used: the account had no API credits; free image-to-3D tools
   (TripoSR, TRELLIS) give unrigged, lower-quality meshes than the Sketchfab models used. The SOMA model itself was not retrained: it was
   released without training code.
+- Starts and turns are planned within human acceleration, so a 180 deg reversal takes about 0.6 s and a
+  stop from a sprint 0.5-0.64 s (snappier gameplay presets used to allow 0.4-0.5 s with a sprinter's
+  lunge). The network can still produce a body flip on a reversal; such results are discarded and
+  replanned through 90 deg, but after two flips in a row the third result is used as is.
+- Adaptive quality lowers resolution and shadows only; it does not reduce the SOMA network's cost,
+  which the controller already limits to one request in flight. Phones were not available for testing:
+  the slow-device numbers come from emulated latency and the headless software renderer.
+- The SOMA network was not retrained or fine-tuned (no training code or training data was released);
+  "trained here" applies to the animal network only. The human and animal networks are not fused into
+  one computation: they never run together, so fusing would not lower CPU use.
 - Fighting moves: the key poses are hand-built by IK, the motion into and out of them is SOMA; the
   model was not trained on fighting, so strikes are less crisp than captured martial arts.
 - Target windows come from 4,737 mocap frames (with mirrored copies); straight running near

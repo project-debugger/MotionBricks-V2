@@ -16,6 +16,7 @@ try {
   const { meta, buffer: bin } = readAnimalNet(await fetch(BASE + (q.get('net') || first)).then((r) => r.arrayBuffer()));
   // ?model=1: drive the realistic skinned model too (its bone update is then part of the step time)
   const model = q.has('model') ? await loadAnimalModel(THREE, key, (p) => fetch(BASE + p).then((r) => r.arrayBuffer())) : null;
+  if (q.has('nosimd')) globalThis.SOMA_NO_SIMD = true;
   const net = new DogNet(meta, bin), scene = new THREE.Scene(), a = new NeuralAnimal(THREE, scene, key, net, model);
   const SCRIPT = [[0, null, 'run'], [2, [0, 1], 'walk'], [6, [0, 1], 'run'], [10, [1, 0], 'run'], [13, [0, 1], 'sprint'], [17, [-1, 0], 'run'],
     [20, null, 'run'], [22, null, 'run', 'duck'], [26, null, 'run', 'stand_up'], [29, null, 'run', 'jump'], [31, [0, 1], 'run', 'jump'], [33, null, 'run'], [34, null, 'run', 'block'], [36.5, null, 'run'], [38, null, 'end']];

@@ -67,8 +67,9 @@ A live generation takes 0.25 s here and longer on a phone, so the first frames o
 never come from a request made at that moment. The playground therefore ships a **transition bank**:
 294 starts (8 directions x walk/run/sprint), stops (from 4 stride phases at each speed), turns
 (+-45/90/135/180 deg), gait changes, crouch moves and jump/dodge/duck from idle, walk and run,
-17,837 frames in total. Every bank frame is output of the same SOMA network and pipeline, generated
-ahead of time by `build/tools/gen_bank.html` from mocap contexts.
+21,450 frames in total. Every bank frame is output of the same SOMA network and pipeline, generated
+ahead of time by `build/tools/gen_bank.html` from mocap contexts, as chains of short segments
+(see "Starts and turns").
 
 When the input changes, the controller scores every bank frame against the character's current
 feet, root velocity and the path the new command asks for (motion matching), restricted to the
@@ -96,6 +97,41 @@ No freezes or lurches; top speed 5.7-6.0 m/s (sprint 5.5); joint angular speed p
 displayed per-joint maxima within ~1.5x of the mocap's. Arm swing after a 90 deg turn: hand
 travel 0.48 / 0.59 m and elbow range 48-54 deg (before: 0.28 / 0.21 m, 19-20 deg; mocap running:
 0.46-0.52 m, 52 deg). Walking reaches its 1.4 m/s target (before 0.84 m/s) with even arm swing.
+
+## Starts and turns: upright, no flips
+
+Recorded frame by frame (`SOMA_DEBUG.step(dt)` advances the game exactly one frame), starting to jog used
+to play a sprinter's block start: the torso pitched up to 50 deg forward with the arms hanging, for about
+half a second; some 180 deg reversals flipped the body through one frame. Both came from the transition
+bank, and both are fixed (`build/test/startlab.html` reproduces the experiments):
+
+- **Cause of the lunge**: each bank start or turn was one 16-token (1.9 s) request. Given that much time,
+  the SOMA network plans a block start, even with every post pass off (torso pitch 38-54 deg idle to run,
+  60-97 deg idle to sprint). 6-token steps reach the same speed (3.4 m/s after about 1 s) with 7-9 deg of
+  lean, as people start a jog. Bank entries are now chains of 6-token segments (12 frames kept from each),
+  the way live play requests motion.
+- **Flips**: the network sometimes jumps a 180 deg reversal through one or two frames (70-170 deg).
+  `maxBodyStep` flags any body joint turning more than 60 deg in a frame; the generator then turns
+  through one side first (90 deg, then 180), and the live controller discards such a result and replans
+  through 90 deg (at most twice in a row, so playback never waits).
+- **Human acceleration**: planned motion speeds up and brakes no faster than people in the mocap
+  (walk 2.5, jog 4.5, sprint 6 m/s^2; braking 3.5-7), measured on the 100STYLE and NVIDIA clips.
+  Turning keeps the preset's rate.
+- **Bank matching**: an entry of another gait family costs 2 (was 0.25), so a jog never starts from a
+  walking turn.
+
+| Peak torso pitch (hips to neck) | Before | After |
+|---|---|---|
+| bank, idle to run (all directions) | 38-54 deg | 9-14 deg |
+| bank, idle to sprint | 60-97 deg | 6-11 deg |
+| bank, walk to run / run turns | 20-66 / up to 58 deg | 11-14 / up to 17 deg |
+| live jog start straight / 90 deg / 180 deg | 49 / 17-29 / 17-36 deg | 9 / 9-12 / 13-15 deg |
+| live, 450 ms extra latency (phone) | - | 8-14 deg |
+| real people starting a jog (100STYLE) | 24 deg (99th pct), 32 max | |
+
+Worst shoulder turn in one frame across the bank: 145 -> 25 deg. Response (sim, desktop): start to
+run 0.23 s (was 0.38), 90 deg turn 0.08 s, sprint 0.11 s; a 180 deg reversal takes 0.6 s (was 0.5)
+and a stop from sprint 0.5-0.64 s (was 0.43), because the body now brakes like a person.
 
 ## Shooter-style movement (default preset)
 
@@ -264,6 +300,23 @@ scratch, driving realistic skinned 3D models:
   released foot carries its offset while the lock fades (the earlier version pulled the foot back
   toward its old spot during the fade: up to 18 cm in this test, the "legs stuck, then pop back"
   glitch). Blends after an instant transition are softer (0.14 s half-life).
+
+## Phones and old PCs
+
+- **Animal network in WebAssembly SIMD**: the expert-blended layers run in a 400-byte SIMD kernel
+  (`build/tools/mix_simd.wat`, embedded in `js/animalnet.js`): 0.19 ms per step instead of 1.32 ms
+  (6.9x), outputs equal to the JS path within 1e-6, identical rollout metrics. Browsers without SIMD
+  use the JS path. Main-thread cost of an animal: 5.3 -> 1.6 ms per frame here.
+- **Adaptive quality** (Settings, on by default): when the frame rate stays below 40 fps the resolution,
+  then the shadow quality, then the shadows step down (4 levels, "lite n" in the fps chip); above
+  57 fps they step back up, one change per 4-8 s. On this machine's software renderer (a stand-in
+  for a weak GPU): 12 -> 23-27 fps.
+- Human: the controller costs 1.2-1.4 ms per frame on the main thread; the SOMA network runs in a
+  worker (0.19 s per generation with 4 threads here, about 4 generations per second while moving,
+  1.5 when idle). Slow devices get fewer, longer generations automatically (one request in flight).
+- The human and animal networks are one model file (split GGUF) but never run at the same time, so
+  fusing their computation would not lower the CPU load; it would make animal-only play download and
+  start the 152 MB human network.
 
 ## Performance (measured here, not on phones)
 

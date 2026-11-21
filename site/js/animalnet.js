@@ -19,6 +19,29 @@ function half2float(buf, offset, n) {
   return out;
 }
 
+// WebAssembly SIMD kernel for the expert-blended layers (build/tools/mix_simd.wat, built by build_simd.cjs):
+// the same sums 4 floats per instruction, about 3x faster than plain JS. Browsers without SIMD use the JS path.
+const SIMD_MIX = 'AGFzbQEAAAABDAFgCH9/f39/f39/AAMCAQAFAwEAAQcNAgNtZW0CAANtaXgAAArmAgHjAgQDfwF9AXsDfyAGQQJ0IQ5BACEKAkADQCAKIA5PDQEgBCAKav0MAAAAAAAAAAAAAAAAAAAAAP0LBAAgCkEQaiEKDAALC0EAIQgCQANAIAggB08NASACIAhBAnRqKgIAIQsgC/0TIQwgASAIIA5saiEPQQAhCgJAA0AgCiAOTw0BIAQgCmogBCAKav0ABAAgDCAPIApq/QAEAP3mAf3kAf0LBAAgCkEQaiEKDAALCyAAIAggBWwgDmxqIQ1BACEJAkADQCAJIAVPDQEgCyADIAlBAnRqKgIAlP0TIQxBACEKAkADQCAKIA5PDQEgBCAKaiAEIApq/QAEACAMIA0gCmr9AAQA/eYB/eQB/QsEACAEIApBEGpqIAQgCkEQamr9AAQAIAwgDSAKQRBqav0ABAD95gH95AH9CwQAIApBIGohCgwACwsgDSAOaiENIAlBAWohCQwACwsgCEEBaiEIDAALCws=';
+function simdKernel(net) {
+  try {
+    if (typeof WebAssembly === 'undefined' || globalThis.SOMA_NO_SIMD) return null;
+    const bytes = Uint8Array.from(atob(SIMD_MIX), (c) => c.charCodeAt(0));
+    if (!WebAssembly.validate(bytes)) return null;
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), {}), mem = inst.exports.mem;
+    const pad = (n) => Math.ceil(n / 8) * 8, K = net.K;
+    let off = 0; const alloc = (floats) => { const o = off; off += Math.ceil(floats / 4) * 16; return o; };
+    const layers = net.layers.map((L) => ({ ...L, noP: pad(L.o), w: alloc(K * L.i * pad(L.o)), b: alloc(K * pad(L.o)) }));
+    const maxN = pad(Math.max(net.nx, ...net.layers.map((L) => L.o))), al = alloc(K), a = alloc(maxN), b = alloc(maxN);
+    mem.grow(Math.max(0, Math.ceil(off / 65536) - mem.buffer.byteLength / 65536));
+    const F = new Float32Array(mem.buffer);
+    for (const L of layers) for (let k = 0; k < K; k++) {
+      for (let i = 0; i < L.i; i++) F.set(L.W.subarray((k * L.i + i) * L.o, (k * L.i + i + 1) * L.o), (L.w >> 2) + (k * L.i + i) * L.noP);
+      F.set(L.B.subarray(k * L.o, (k + 1) * L.o), (L.b >> 2) + k * L.noP);
+    }
+    return { mix: inst.exports.mix, F, layers, al, a, b };
+  } catch { return null; }
+}
+
 export class DogNet {
   constructor(meta, buffer) {
     this.meta = meta; const T = {};
@@ -30,6 +53,7 @@ export class DogNet {
     this.nx = this.xm.length; this.ny = this.ym.length; this.ng = this.gm.length;
     this.bufA = new Float32Array(Math.max(this.nx, this.H, this.ny)); this.bufB = new Float32Array(Math.max(this.nx, this.H, this.ny));
     this.alpha = new Float32Array(this.K);
+    this.simd = simdKernel(this);
   }
   forward(g, x) {
     // gating network -> expert blend
@@ -43,6 +67,20 @@ export class DogNet {
     let sum = 0; for (let k = 0; k < this.K; k++) { this.alpha[k] = Math.exp(h[k] - mx); sum += this.alpha[k]; }
     for (let k = 0; k < this.K; k++) this.alpha[k] /= sum;
     // motion network with expert-blended layers
+    if (this.simd) {
+      const S = this.simd, F = S.F;
+      F.set(this.alpha, S.al >> 2);
+      let ip = S.a, op = S.b;
+      for (let i = 0; i < this.nx; i++) F[(ip >> 2) + i] = (x[i] - this.xm[i]) / this.xs[i];
+      S.layers.forEach((L, li) => {
+        S.mix(L.w, L.b, S.al, ip, op, L.i, L.noP, this.K);
+        if (li < 2) for (let o = op >> 2, e = o + L.o; o < e; o++) { const v = F[o]; F[o] = v > 0 ? v : Math.exp(v) - 1; }
+        const t = ip; ip = op; op = t;
+      });
+      const y = new Float32Array(this.ny), base = ip >> 2;
+      for (let i = 0; i < this.ny; i++) y[i] = F[base + i] * this.ys[i] + this.ym[i];
+      return y;
+    }
     let inp = this.bufA, out = this.bufB;
     for (let i = 0; i < this.nx; i++) inp[i] = (x[i] - this.xm[i]) / this.xs[i];
     this.layers.forEach((L, li) => {

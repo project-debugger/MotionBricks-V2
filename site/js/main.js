@@ -43,9 +43,41 @@ function gridTexture() {
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(200, 200); t.anisotropy = 8; t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+// Adapts rendering to the device: when the frame rate stays low the resolution, then the shadow quality, then the
+// shadows step down; with headroom they step back up (at most one change per few seconds, no flicker).
+export class QualityGovernor {
+  constructor(R, base) { this.R = R; this.base = base; this.level = 0; this.t = 0; this.n = 0; this.acc = 0; this.hold = 3; this.good = 0; }
+  static LEVELS = [{ ratio: 1, shadows: 2 }, { ratio: 0.75, shadows: 2 }, { ratio: 0.6, shadows: 1 }, { ratio: 0.5, shadows: 0 }];
+  apply(level) {
+    const L = QualityGovernor.LEVELS[level], r = this.R.renderer;
+    this.level = level;
+    r.setPixelRatio(Math.max(0.5, this.base * L.ratio));
+    const sm = L.shadows > 0;
+    if (r.shadowMap.enabled !== sm || (sm && (r.shadowMap.type === THREE.PCFSoftShadowMap) !== (L.shadows === 2))) {
+      r.shadowMap.enabled = sm; r.shadowMap.type = L.shadows === 2 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+      this.R.sun.castShadow = sm; if (this.R.sun.shadow.map) { this.R.sun.shadow.map.dispose(); this.R.sun.shadow.map = null; }
+      this.R.scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
+    }
+  }
+  // dt: real frame time (s); enabled: setting; returns true when the level changed
+  update(dt, enabled) {
+    if (!enabled) { if (this.level) this.apply(0); return false; }
+    if (dt <= 0 || dt > 0.5) return false; // tab switches, stalls
+    this.hold -= dt; this.acc += dt; this.n++;
+    if (this.acc < 2) return false;
+    const fps = this.n / this.acc; this.acc = 0; this.n = 0;
+    this.good = fps > 57 ? this.good + 2 : 0;
+    if (this.hold > 0) return false;
+    if (fps < 40 && this.level < QualityGovernor.LEVELS.length - 1) { this.apply(this.level + 1); this.hold = 4; return true; }
+    if (this.good >= 8 && this.level > 0) { this.apply(this.level - 1); this.hold = 8; this.good = 0; return true; }
+    return false;
+  }
+}
+
 function buildScene(mesh) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, IS_TOUCH ? 1.5 : 2));
+  const basePixelRatio = Math.min(devicePixelRatio, IS_TOUCH ? 1.5 : 2);
+  renderer.setPixelRatio(basePixelRatio);
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.outputColorSpace = THREE.SRGBColorSpace;
   $('#stage').appendChild(renderer.domElement);
@@ -93,7 +125,7 @@ function buildScene(mesh) {
   };
   const resize = () => { const w = innerWidth, h = innerHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); };
   addEventListener('resize', resize); resize();
-  return { renderer, scene, camera, bones, sun, chair, landmarks, geo, inverses, skin, body };
+  return { renderer, scene, camera, bones, sun, chair, landmarks, geo, inverses, skin, body, basePixelRatio };
 }
 
 // ------------------------------------------------------------------ input
@@ -190,7 +222,8 @@ const SLIDERS = [
   ['steering', 'Body-rotation assist (0 = off)', 0, 360, 10, 'deg/s'],
 ];
 const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomical joint limits'], ['fingers', 'Procedural fingers'], ['velocityMatching', 'Velocity-matched joins'], ['lookAt', 'Head leads turns'],
-  ['instant', 'Instant response (pre-generated SOMA transitions)'], ['bodyFX', 'Muscles, breathing and soft tissue']];
+  ['instant', 'Instant response (pre-generated SOMA transitions)'], ['bodyFX', 'Muscles, breathing and soft tissue'],
+  ['autoQuality', 'Adapt resolution and shadows to this device (keeps the frame rate up on phones and old PCs)']];
 let WALK_STYLES = [];
 function buildPanel(models, onModel, onCharacter, onWalkStyle) {
   const p = $('#panel-body');
@@ -367,6 +400,7 @@ async function main() {
   if (!IS_TOUCH) document.body.classList.add('desktop');
 
   // per-frame cost counters (main thread) and generation cost (worker); read by the performance governor and tests
+  const governor = new QualityGovernor(R, R.basePixelRatio);
   const PERF = window.SOMA_PERF = { frames: 0, frameMs: 0, update: 0, post: 0, render: 0, net: 0, gens: 0, animal: 0 };
   // loop
   const camT = new THREE.Vector3(0, 0.95, 0); let last = performance.now(), fpsAcc = 0, fpsN = 0;
@@ -374,7 +408,9 @@ async function main() {
   function frame(now) {
     // test hook: with SOMA_MANUAL set, the game only advances through SOMA_DEBUG.step(dt) (frame-exact captures)
     if (window.SOMA_MANUAL && !frame.stepping) { last = now; requestAnimationFrame(frame); return; }
-    const dt = frame.stepping ? frame.stepping : Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now; // stays real-time down to 10 fps
+    const realDt = (now - last) / 1000;
+    const dt = frame.stepping ? frame.stepping : Math.min(0.1, Math.max(0, realDt)); last = now; // stays real-time down to 10 fps
+    if (!frame.stepping && (ready || animal)) governor.update(realDt, S.autoQuality !== false);
     let pose;
     if (animal) {
       if (window.SOMA_HIDE_LANDMARKS) for (const b of R.landmarks) b.visible = false; // debug captures
@@ -390,7 +426,7 @@ async function main() {
       R.sun.shadow.camera.left = R.sun.shadow.camera.bottom = -4 * sc; R.sun.shadow.camera.right = R.sun.shadow.camera.top = 4 * sc; R.sun.shadow.camera.updateProjectionMatrix();
       const tr = performance.now(); R.renderer.render(R.scene, R.camera); PERF.render += performance.now() - tr; PERF.frames++; PERF.frameMs += dt * 1000;
       fpsAcc += dt; fpsN++;
-      if (fpsAcc > 0.5) { $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps`; $('#hud-speed').textContent = `${animal.speed.toFixed(1)} m/s`; fpsAcc = 0; fpsN = 0; }
+      if (fpsAcc > 0.5) { $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps${governor.level ? ' · lite ' + governor.level : ''}`; $('#hud-speed').textContent = `${animal.speed.toFixed(1)} m/s`; fpsAcc = 0; fpsN = 0; }
       window.SOMA_STATE = { ready, animal: animal.key, speed: animal.speed, pos: [animal.pos.x, animal.pos.z], action: animal.action ? animal.action.name : null, mode: animal.mode };
       if (!frame.stepping) requestAnimationFrame(frame);
       return;
@@ -428,7 +464,7 @@ async function main() {
     PERF.render += performance.now() - tr; PERF.frames++; PERF.frameMs += dt * 1000;
     fpsAcc += dt; fpsN++;
     if (fpsAcc > 0.5) {
-      $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps`;
+      $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps${governor.level ? ' · lite ' + governor.level : ''}`;
       $('#hud-speed').textContent = `${Math.hypot(ctrl.simVel[0], ctrl.simVel[2]).toFixed(1)} m/s`;
       $('#hud-gens').textContent = `${ctrl.stats.generations}`;
       $('#hud-lat').textContent = `${(ctrl.latency * 1000).toFixed(0)} ms`;
@@ -441,6 +477,6 @@ async function main() {
   }
   requestAnimationFrame(frame);
   const step = (dt = 1 / 30) => { frame.stepping = dt; try { frame(performance.now()); } finally { frame.stepping = 0; } };
-  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, clips, sk, M, loadWalkStyle, step, R, get animal() { return animal; } };
+  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, clips, sk, M, loadWalkStyle, step, R, governor, get animal() { return animal; } };
 }
 main().catch((e) => { $('#status').textContent = `Error: ${e.message}`; console.error(e); });
