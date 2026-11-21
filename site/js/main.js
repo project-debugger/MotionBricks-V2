@@ -10,7 +10,7 @@ import { BodyFX } from './body.js';
 import { registerFightActions } from './fight.js';
 import { Animal, SPECIES } from './animals.js';
 import { DogNet, NeuralAnimal } from './animalnet.js';
-import { readGGUF } from './gguf.js';
+import { readAnimalNet } from './gguf.js';
 import { ANIMAL_MODELS, loadAnimalModel } from './animalmesh.js';
 import { PRESETS, DEFAULTS } from './settings.js';
 
@@ -29,7 +29,7 @@ async function getJSON(p) { const r = await fetch(BASE + p); if (!r.ok) throw ne
 // hosts that refuse .bin files (claude.ai artifacts) serve the same bytes under another extension
 const BIN_EXT = document.querySelector('meta[name="soma-bin-ext"]')?.content || '.bin';
 async function getBin(p) { p = p.replace(/\.bin$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
-async function getGlb(p) { if (BIN_EXT !== '.bin') p = p.replace(/\.(glb|gguf)$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
+async function getGlb(p) { if (BIN_EXT !== '.bin') p = p.replace(/\.(glb|gguf|wasm)$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
 
 // ------------------------------------------------------------------ renderer
 function gridTexture() {
@@ -240,7 +240,11 @@ async function main() {
     getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/soma_mesh.json'), getBin('data/soma_mesh.bin'), getJSON('models/models.json'),
     getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('data/bank.json'), getBin('data/bank.bin')]);
   let dogNet = null;
-  try { const { meta, buffer } = readGGUF(await getGlb('data/animal/animalnet.gguf')); dogNet = new DogNet(meta, buffer); } catch (e) { console.warn('animal network unavailable', e); }
+  // the animal network is shard 1 of the single GGUF model file (models/<model>/motionbricks-00001-of-000NN.gguf)
+  try {
+    const mk = models.models.balanced ? 'balanced' : Object.keys(models.models)[0], first = models.models[mk].parts[0].file;
+    const { meta, buffer } = readAnimalNet(await getGlb(`models/${mk}/${first}`)); dogNet = new DogNet(meta, buffer);
+  } catch (e) { console.warn('animal network unavailable', e); }
   const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
   const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk);
   const fightPoses = registerFightActions(sk, lib, wmeta.actions, limits);
@@ -272,7 +276,8 @@ async function main() {
       const frames = [], contacts = [];
       for (let i = 0; i < m.count; i++) { frames.push(m.frames.slice(i * J * 7, (i + 1) * J * 7)); contacts.push(Array.from(m.contacts.slice(i * 4, i * 4 + 4))); }
       $('#hud-net').textContent = `${m.ms.network.toFixed(0)} ms`;
-      w.resolve({ frames, contacts, tokens: m.tokens });
+      const done = () => w.resolve({ frames, contacts, tokens: m.tokens });
+      if (window.SOMA_EXTRA_MS) setTimeout(done, window.SOMA_EXTRA_MS); else done(); // test hook: emulate a slow phone
     } else if (m.type === 'error') {
       if (m.id && waiting.has(m.id)) { waiting.get(m.id).reject(new Error(m.error)); waiting.delete(m.id); }
       else { status(`Could not start the model: ${m.error}`); $('#loading').hidden = false; }

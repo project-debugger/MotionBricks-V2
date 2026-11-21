@@ -150,9 +150,10 @@ scratch, driving realistic skinned 3D models:
   velocities. Output: the next pose, root motion, the future path and paw contacts. 0.77 M weights,
   1.5 MB as float16; trained for 100 epochs (16 minutes) on 253,336 samples on this machine's CPU;
   validation loss 0.24 on 5 held-out clips (training loss 0.08).
-- **One file**: the trained weights and their metadata ship as a single GGUF file,
-  `data/animal/animalnet.gguf` (`tools/animal/to_gguf.py`, read by `js/gguf.js`). GGUF is the ggml / llama.cpp
-  tensor container; this is not a language model and llama.cpp cannot run it.
+- **One model file**: both networks ship as one GGUF model, split like llama.cpp's `gguf-split` into 13 shards of
+  at most 14 MB (`models/balanced/motionbricks-000NN-of-00013.gguf`, `tools/gguf/build_gguf.py`, read by `js/gguf.js`).
+  Shard 1 (1.6 MB) holds the animal network and the metadata, so the animal mode downloads only that shard. GGUF is
+  the ggml / llama.cpp container; llama.cpp cannot run these networks, the browser does.
 - **Runtime** (`js/animalnet.js`): evaluated every frame in plain JavaScript (about 1.5 ms; matches
   PyTorch to 1e-6), bone lengths kept. Paws the network marks as in contact stay planted (up to
   10 cm of lag before they slide, never beyond the leg's reach).

@@ -14,7 +14,8 @@ Changes relative to upstream: vectorised NumPy implementation, batching, and the
 velocity-matching and contact-aware options in codec.py.
 
 Model weights: NVIDIA Open Model Agreement ("Licensed by NVIDIA Corporation under the NVIDIA Open
-Model License"). site/models/ holds an INT8-quantized derivative (int8/FP16 weight storage) for the web demo.
+Model License"). site/models/ holds an INT8-quantized derivative for the web demo, stored in a split GGUF file
+whose INT8 matrix weights are re-coded with ggml Q5_0 blocks (tools/gguf/build_gguf.py).
 Sample motion clips: NVIDIA Sample Data Evaluation License. The clips are not redistributed here;
 site/data/windows.* contains motion windows derived from them (internal evaluation use).
 SOMA body mesh (site/data/soma_mesh.*): extracted from the upstream MotionBricks asset
@@ -25,8 +26,8 @@ site/vendor/ redistributes, unmodified: onnxruntime-web 1.31.1 (Microsoft, MIT),
 site/coi-serviceworker.js (Guido Zuidhof, MIT). Licence texts are in site/vendor/.
 
 
-site/data/animal/animalnet.gguf: network weights trained in this repository (tools/animal/train_mann.py, packed by
-tools/animal/to_gguf.py) on the
+site/models/balanced/motionbricks-*.gguf, shard 1 (animal network): weights trained in this repository
+(tools/animal/train_mann.py, packed by tools/gguf/build_gguf.py) on the
 dog motion capture of Zhang, Starke, Komura and Saito, "Mode-Adaptive Neural Networks for Quadruped Motion
 Control" (SIGGRAPH 2018), https://github.com/sebastianstarke/AI4Animation, licensed CC BY-NC 4.0. The weights
 are a derivative of that data: non-commercial use only, with attribution. The raw data is not redistributed.

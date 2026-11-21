@@ -8,11 +8,12 @@
 import * as THREE from 'three';
 import { DogNet, NeuralAnimal } from '../../js/animalnet.js';
 import { loadAnimalModel } from '../../js/animalmesh.js';
-import { readGGUF } from '../../js/gguf.js';
+import { readAnimalNet } from '../../js/gguf.js';
 const q = new URLSearchParams(location.search), key = q.get('species') || 'dog';
 const BASE = new URL('../../', location.href).href;
 try {
-  const { meta, buffer: bin } = readGGUF(await fetch(BASE + (q.get('net') || 'data/animal/animalnet.gguf')).then((r) => r.arrayBuffer()));
+  const man = await fetch(BASE + 'models/models.json').then((r) => r.json()), first = `models/balanced/${man.models.balanced.parts[0].file}`;
+  const { meta, buffer: bin } = readAnimalNet(await fetch(BASE + (q.get('net') || first)).then((r) => r.arrayBuffer()));
   // ?model=1: drive the realistic skinned model too (its bone update is then part of the step time)
   const model = q.has('model') ? await loadAnimalModel(THREE, key, (p) => fetch(BASE + p).then((r) => r.arrayBuffer())) : null;
   const net = new DogNet(meta, bin), scene = new THREE.Scene(), a = new NeuralAnimal(THREE, scene, key, net, model);

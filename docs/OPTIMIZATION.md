@@ -99,3 +99,22 @@ Single-thread speed-ups are larger (INT8 ×2.5–2.6, INT8-pose ×2.0): INT8-pos
   only ~20–30 tokens, so attention is a small share of time; the MatMul weights dominate.
 - **Static (calibrated) INT8 QDQ** for the conv-heavy root/decoder parts was not attempted: the
   root model is the accuracy-sensitive part, and ConvInteger kernels are slow on ORT CPU.
+
+## Web model: one split GGUF, Q5_0 storage (INT8 compute)
+
+`tools/gguf/build_gguf.py` packs the browser's SOMA model and the animal network into one GGUF model split into 13
+shards (llama.cpp `split.*` keys, each shard a valid GGUF; `gguf-py` reads them). The 136 M dynamic-INT8 weights of the
+pose transformer's matrix multiplies are re-coded with ggml's Q5_0 blocks for storage and decoded back onto the INT8
+grid in the browser (integer math, ~0.5 s for all of them on this CPU), so the onnxruntime graph, speed and memory are
+those of the INT8 model. The duration head (512x12) and the quantization-sensitive root/decoder weights are left as
+they were.
+
+| Storage | Download | Eval MPJPE (pinned) | Same duration as the INT8 file (free / pinned) |
+|---|---|---|---|
+| INT8 ONNX (before) | 192.8 MB | 7.10 cm | - |
+| Q4_0 pose weights | ~133 MB | 7.27 cm | 88 % / 100 % |
+| **Q5_0 pose weights (shipped, as rebuilt in the browser)** | **151.8 MB** | **7.11 cm** | **98.4 % / 100 %** |
+| Q5_0 on every INT8 weight | ~134 MB | 12.93 cm | 84 % (not usable: root and decoder are sensitive) |
+
+Runtime memory is unchanged: the pose weights stay INT8 in `MatMulInteger`, so RAM is set by the INT8 model, not by
+a float copy. VRAM is not used (onnxruntime-web runs on the CPU through WebAssembly).

@@ -2,6 +2,7 @@
 // (encode -> onnxruntime-web -> decode -> corrections -> anatomical limits) off the main thread.
 import * as ort from '../vendor/ort/ort.wasm.min.mjs';
 import { bind, bindLimits, encode, postProcess } from './codec.js';
+import { parseGGUF, OnnxAssembler } from './gguf.js';
 
 let session = null, binding = null, limits = null, CACHE = 'soma-models';
 
@@ -23,12 +24,24 @@ async function load({ base, model, info, skeleton, jointLimits, threads }) {
   limits = bindLimits(jointLimits, skeleton);
   ort.env.wasm.wasmPaths = new URL('../vendor/ort/', self.location.href).href;
   ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, threads) : 1;
-  const all = new Uint8Array(info.bytes);
-  let off = 0, done = 0;
+  let all, off = 0, done = 0;
   const t0 = performance.now();
-  for (const p of info.parts) {
-    const b = await fetchPart(`${base}${model}/${p.file}`, (n) => { done += n; postMessage({ type: 'progress', done, total: info.bytes }); });
-    all.set(b, off); off += b.length;
+  if (info.format === 'gguf') { // one split GGUF: shard 1 = metadata (+ animal net), the rest rebuilt into the ONNX file shard by shard
+    let asm = null;
+    for (const p of info.parts) {
+      const b = await fetchPart(`${base}${model}/${p.file}`, (n) => { done += n; postMessage({ type: 'progress', done, total: info.bytes }); });
+      const g = parseGGUF(b.buffer);
+      if (!asm) { const meta = g.kv['soma.splice_json']; if (!meta) throw new Error('GGUF shard 1 has no SOMA metadata'); asm = new OnnxAssembler(JSON.parse(meta)); }
+      asm.add(g);
+    }
+    if (!asm.complete) throw new Error('GGUF: some SOMA tensors are missing');
+    all = asm.out;
+  } else {
+    all = new Uint8Array(info.bytes);
+    for (const p of info.parts) {
+      const b = await fetchPart(`${base}${model}/${p.file}`, (n) => { done += n; postMessage({ type: 'progress', done, total: info.bytes }); });
+      all.set(b, off); off += b.length;
+    }
   }
   postMessage({ type: 'status', text: 'Starting the SOMA network...' });
   if (session) { try { await session.release(); } catch { /* ignore */ } }

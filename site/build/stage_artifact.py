@@ -45,7 +45,7 @@ def main():
     for k, m in manifest["models"].items():
         (out / "models" / k).mkdir(parents=True)
         for p in m["parts"]:
-            name = p["file"].replace(".bin", ".wasm")
+            name = p["file"].replace(".bin", ".wasm").replace(".gguf", ".wasm")
             shutil.copy(SITE / "models" / k / p["file"], out / "models" / k / name)
             p["file"] = name
     (out / "models/models.json").write_text(json.dumps(manifest, indent=1))

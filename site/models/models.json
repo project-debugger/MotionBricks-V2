@@ -1,84 +1,67 @@
 {
  "models": {
   "balanced": {
-   "label": "Balanced - INT8 pose transformer",
+   "label": "Balanced - INT8 pose transformer (Q5_0 storage)",
    "source": "soma_int8_pose.onnx",
-   "bytes": 192796206,
-   "sha256": "381931a74a28d65c5da315a8338346e32dfe1ea9e1ed2fb89ae1d5cb0c4ab086",
+   "bytes": 151761488,
+   "sha256": "2cad40755a1769857baab91104529547fabb5e0e97134993a4b830fde43d6ae8",
    "int8_initializers": 86,
    "fp16_initializers": 5,
    "parts": [
     {
-     "file": "part000.bin",
-     "bytes": 14680064,
-     "sha256": "ccb44818ac1f59e271a59c24cd2dfb91075fa8f01c5dfb1614d6579a0bd52833"
+     "file": "motionbricks-00001-of-00013.gguf",
+     "bytes": 1558032
     },
     {
-     "file": "part001.bin",
-     "bytes": 14680064,
-     "sha256": "f9bd4df42342dcd6e62f09e7639784f909dc4b16838aa9591dbf83fa3f9b3b23"
+     "file": "motionbricks-00002-of-00013.gguf",
+     "bytes": 12583104
     },
     {
-     "file": "part002.bin",
-     "bytes": 14680064,
-     "sha256": "c2d8278baab6005a8cc35b40398ce5ec4926be41fc41c2427af11ce574f4ae99"
+     "file": "motionbricks-00003-of-00013.gguf",
+     "bytes": 12583104
     },
     {
-     "file": "part003.bin",
-     "bytes": 14680064,
-     "sha256": "768c8a513d8c687c42efb8d171019c8a825e4bd43b19fffbcc6b8859c1b568ee"
+     "file": "motionbricks-00004-of-00013.gguf",
+     "bytes": 12583104
     },
     {
-     "file": "part004.bin",
-     "bytes": 14680064,
-     "sha256": "10b52c7830178f5b7a5dfa27a76af0dbe14dc176bca1887048d9b901f7dfb5f5"
+     "file": "motionbricks-00005-of-00013.gguf",
+     "bytes": 12583104
     },
     {
-     "file": "part005.bin",
-     "bytes": 14680064,
-     "sha256": "1b7981d727aa7d43ef86bce46863511c45c909ccf2b6dd4a2678652cf13220d3"
+     "file": "motionbricks-00006-of-00013.gguf",
+     "bytes": 13359456
     },
     {
-     "file": "part006.bin",
-     "bytes": 14680064,
-     "sha256": "6a733a32e794d6285c34805f0477e67ba95a231a43b1a7df55397677c8b9791b"
+     "file": "motionbricks-00007-of-00013.gguf",
+     "bytes": 13697632
     },
     {
-     "file": "part007.bin",
-     "bytes": 14680064,
-     "sha256": "c6f508b84c858a98cc6e92ad73c4e009a4ea44cb77eb2bada1e1ae01a09a60d7"
+     "file": "motionbricks-00008-of-00013.gguf",
+     "bytes": 13697664
     },
     {
-     "file": "part008.bin",
-     "bytes": 14680064,
-     "sha256": "ea77edf4b9c80ecc68b5ba93a5c94eb5117b83c4c13d77ad7f0cc967308d0fc1"
+     "file": "motionbricks-00009-of-00013.gguf",
+     "bytes": 12976736
     },
     {
-     "file": "part009.bin",
-     "bytes": 14680064,
-     "sha256": "ccda32495df33dc043112846fda8499541461bb57a71953cbe2ad0bd7bcccf3f"
+     "file": "motionbricks-00010-of-00013.gguf",
+     "bytes": 13697632
     },
     {
-     "file": "part010.bin",
-     "bytes": 14680064,
-     "sha256": "15d85e18cf1ebc2ca7e66429333dfc047c31755b18f46efbb48a6eae6b8f7500"
+     "file": "motionbricks-00011-of-00013.gguf",
+     "bytes": 13697664
     },
     {
-     "file": "part011.bin",
-     "bytes": 14680064,
-     "sha256": "1769f2b65e4c5c6204fbcfcdb2e4d297f495c47b458a511cc6475a0769406a58"
+     "file": "motionbricks-00012-of-00013.gguf",
+     "bytes": 12976736
     },
     {
-     "file": "part012.bin",
-     "bytes": 14680064,
-     "sha256": "6d59aafb4e434cb10e913638d9170915940119e519243d9c007f08c8d20bc54f"
-    },
-    {
-     "file": "part013.bin",
-     "bytes": 1955374,
-     "sha256": "764e80f3fca416a0c39c7342144076f3bf907995fbc1a597f435f950e33aab57"
+     "file": "motionbricks-00013-of-00013.gguf",
+     "bytes": 5767520
     }
-   ]
+   ],
+   "format": "gguf"
   }
  }
 }
