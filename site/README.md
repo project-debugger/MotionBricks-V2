@@ -97,6 +97,31 @@ displayed per-joint maxima within ~1.5x of the mocap's. Arm swing after a 90 deg
 travel 0.48 / 0.59 m and elbow range 48-54 deg (before: 0.28 / 0.21 m, 19-20 deg; mocap running:
 0.46-0.52 m, 52 deg). Walking reaches its 1.4 m/s target (before 0.84 m/s) with even arm swing.
 
+## Shooter-style movement (default preset)
+
+The default preset, **Shooter**, aims at the feel of third-person action games (movement only):
+
+- quick replans and short blends (the earlier Responsive values) plus a steering assist that turns the
+  motion already playing toward the joystick at up to 220 deg/s;
+- **snappy transitions**: the first 0.4 s after an instant start, stop or turn play up to 35 % faster,
+  easing back to normal speed (slider "Snappy starts, stops and turns");
+- **leaning into turns**: the body banks toward the inside of a curve about a pivot on the ground, by
+  atan(speed x turn rate / g), smoothed (0.15 s) and capped at 16 deg (slider "Lean into turns", default
+  0.8; `build/test/lean_test.mjs` checks the direction on circular paths).
+
+Measured with `build/test/sim.html` (same script, desktop): time to reach the new direction or speed
+
+| Event | Balanced (before) | Shooter |
+|---|---|---|
+| start to run | 0.45 s | 0.38 s |
+| 90 deg turn while running | 0.30 s | 0.10 s |
+| 180 deg reversal | 0.55 s | 0.52 s |
+| stop | 0.47-0.55 s | 0.43 s |
+
+Joint-speed p99 is unchanged (13.8 vs 14.2 rad/s); with 300 ms extra generation latency (slow phone) there are
+still no freezes, lurches or failures. The mocap has no real sidestep or backpedal clips, so the character
+always faces where it runs (no strafing).
+
 ## Upper body and hands
 
 - **Calm torso** (`TorsoCalm` in `js/controller.js`, slider "Calm torso twist when running", default 0.4):

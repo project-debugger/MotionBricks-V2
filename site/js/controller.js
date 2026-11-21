@@ -225,6 +225,29 @@ class FingerAnimator {
   }
 }
 
+// Lean into turns: the whole body banks toward the inside of a curve like an inverted pendulum about the feet,
+// angle = atan(speed * turn rate / g) (what a runner needs to stay balanced), smoothed and capped at 16 degrees.
+export class Lean {
+  constructor() { this.prev = null; this.head = null; this.w = 0; this.a = 0; }
+  apply(local, amount, dt) {
+    const p = M.P(local, 0);
+    if (this.prev && dt > 0) {
+      const vx = (p[0] - this.prev[0]) / dt, vz = (p[2] - this.prev[2]) / dt, v = Math.hypot(vx, vz);
+      if (v > 0.3) { const h = Math.atan2(vx, vz); if (this.head !== null) this.w += (M.wrap(h - this.head) / dt - this.w) * (1 - Math.exp(-dt / 0.12)); this.head = h; }
+      else { this.head = null; this.w *= Math.exp(-dt / 0.12); }
+      const want = Math.max(-0.28, Math.min(0.28, Math.atan(v * this.w / 9.81) * amount));
+      this.a += (want - this.a) * (1 - Math.exp(-dt / 0.15));
+      this.dir = v > 0.3 ? [vx / v, 0, vz / v] : (this.dir || [0, 0, 1]);
+    }
+    this.prev = p;
+    if (Math.abs(this.a) < 1e-4) return local;
+    // bank toward the inside of the curve (sign checked on circular test paths in both directions)
+    const q = M.qAxisAngle(this.dir, -this.a), out = new Float64Array(local), piv = [p[0], 0, p[2]], r = M.qrot(q, M.vsub(p, piv));
+    M.setP(out, 0, M.vadd(piv, r)); M.setQ(out, 0, M.qnorm(M.qmul(q, M.Q(local, 0))));
+    return out;
+  }
+}
+
 // Torso calming: keeps the slow part of the chest's turn relative to the hips (turning, looking) and damps the
 // per-stride side-to-side twist, spread over the three spine joints; plus a light temporal filter on the spine.
 class TorsoCalm {
@@ -310,7 +333,7 @@ export class Controller {
     this.feet = new FootLocker(sk, () => ({ on: 0.55, off: 0.35, maxDrift: 0.025, plantSpeed: 0.9, blendIn: 0.05, blendOut: 0.09 }));
     this.fingers = new FingerAnimator(sk, this.buffer[0], () => ({ curlIdle: 12, curlWalk: 20, curlRun: this.S().fingerCurlRun,
       follow: this.S().fingerFollow, variation: 3 }));
-    this.torso = new TorsoCalm(sk);
+    this.torso = new TorsoCalm(sk); this.lean = new Lean();
     this.look = new LookAt(sk);
     this.cycleJoints = LEG_ARM.map((n) => sk.names.indexOf(n)).filter((j) => j > 0);
     this.iR = sk.names.indexOf('RightLeg'); this.iL = sk.names.indexOf('LeftLeg');
@@ -443,7 +466,7 @@ export class Controller {
     this.buffer = [...this.buffer.slice(0, i0 - 1), ...frames];
     this.contacts = [...this.contacts.slice(0, i0 - 1), ...contacts];
     if (before) this.inert.transition(this.baseOut || before, this.basePrev || this.baseOut || before, this.sample(this.time), this.sample(this.time - DT), DT);
-    this.epoch++; this.warps = []; this.planYaw = null; this.warpSincePlan = 0; this.softBlend = 0.45;
+    this.epoch++; this.warps = []; this.planYaw = null; this.warpSincePlan = 0; this.softBlend = 0.45; this.snapT = 0.4;
     this.framesSincePlan = 1e6; this.sinceChange = 0; this.queue = [];
     this.commitEnd = e.action ? (i0 - 1) + frames.length - 1 - (this.latency * FPS + this.S().replanLead + 2) : -1;
     this.stats.instant++;
@@ -647,8 +670,10 @@ export class Controller {
     if (!committed) this.steer(goal, dt);
     this.softBlend = Math.max(0, (this.softBlend || 0) - dt);
     this.inert.halflife = Math.max(s.transitionDuration / 2.5, this.softBlend > 0 ? 0.14 : 0, 1e-3); // softer blend right after an instant transition
-    while (this.buffer.length - 1 - (this.frame + dt * s.playbackRate * FPS) < 2) this.extend();
-    this.time = Math.min(this.time + dt * s.playbackRate, (this.buffer.length - 1) * DT);
+    while (this.buffer.length - 1 - (this.frame + dt * s.playbackRate * (1 + (s.snap || 0)) * FPS) < 2) this.extend();
+    // snappy: the first 0.4 s after an instant start/stop/turn play faster (easing back to normal speed)
+    this.snapT = Math.max(0, (this.snapT || 0) - dt); const u = this.snapT / 0.4, boost = 1 + (s.snap || 0) * u * u * (3 - 2 * u);
+    this.time = Math.min(this.time + dt * s.playbackRate * boost, (this.buffer.length - 1) * DT);
     this.framesSincePlan += dt * FPS; // game frames, independent of the render rate
     let pose = this.sample(this.time);
     const stages = this.debugStages ? { sample: pose } : null;
@@ -656,6 +681,7 @@ export class Controller {
     if (this.inert.active) pose = this.inert.apply(pose, dt);
     this.basePrev = this.baseOut; this.baseOut = pose; // motion stream before IK and procedural layers (what transitions blend)
     if (stages) stages.inert = pose;
+    if ((s.lean ?? 0) > 0) pose = this.lean.apply(pose, s.lean, dt);
     if (s.footLocking) pose = this.feet.apply(pose, this.sampleContacts(this.time), dt);
     if (stages) stages.feet = pose;
     if (s.anatomical) pose = applyLimits(this.limits, pose);
