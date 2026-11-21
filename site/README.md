@@ -165,7 +165,8 @@ scratch, driving realistic skinned 3D models:
   cats and foxes step quicker, horses run faster. Planted paws keep their toes at the standing angle.
 - **Bigger is not better here**: a 6-expert, 320-unit network trained for 150 epochs reached a lower
   validation loss (0.221 vs 0.242) but drove worse in closed loop (stops 4x slower, more paw sliding,
-  jerkier trot, twice the cost), so it was not shipped.
+  jerkier trot, twice the cost), so it was not shipped. A run with noise on the input pose
+  (`--noise 0.1 --keep-best`) was worse still (walk too fast, horse never fully lay down, 4x paw sliding).
 - Controls: move, Sprint (fast gait), Jump (leap), Punch / Kick (pounce), Dodge (side jump),
   Block (rear up; from a run the animal pulls up first), Duck or Sit (lie down / get up). The
   elephant rears instead of jumping. Settings can switch back to the earlier procedural animation
