@@ -5,6 +5,11 @@
 > birds, and nothing in this repository claims otherwise. What exists here is the skeleton-agnostic
 > plumbing a future animal model needs, with human functionality untouched.
 
+> The web playground's animals (`site/`) do not use SOMA: they run a separate, small mode-adaptive
+> network trained in this repository on 41 minutes of dog motion capture (`tools/animal/train_mann.py`,
+> CC BY-NC 4.0 data, non-commercial). Only the dog is real data; the other species are the dog's
+> motion re-proportioned. See `site/README.md`, "Animals (trained network)".
+
 ## What is implemented
 
 `runtime/somart/skeletons.py`:

@@ -22,3 +22,9 @@ soma_base_skel_minimal_no_root.usd, NVIDIA, CC BY 4.0.
 
 site/vendor/ redistributes, unmodified: onnxruntime-web 1.31.1 (Microsoft, MIT), three.js 0.170.0
 (MIT); site/coi-serviceworker.js (Guido Zuidhof, MIT). Licence texts are in site/vendor/.
+
+
+site/data/animal/dognet.*: network weights trained in this repository (tools/animal/train_mann.py) on the
+dog motion capture of Zhang, Starke, Komura and Saito, "Mode-Adaptive Neural Networks for Quadruped Motion
+Control" (SIGGRAPH 2018), https://github.com/sebastianstarke/AI4Animation, licensed CC BY-NC 4.0. The weights
+are a derivative of that data: non-commercial use only, with attribution. The raw data is not redistributed.

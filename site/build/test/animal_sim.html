@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Animal network rollout test</title>
+<script type="importmap">{ "imports": { "three": "../../vendor/three/three.module.min.js" } }</script>
+<!-- Runs the trained animal network (NeuralAnimal) on a scripted input sequence without a renderer and
+     reports stability, speed tracking, paw sliding and joint-speed statistics. ?species=dog -->
+<script type="module">
+import * as THREE from 'three';
+import { DogNet, NeuralAnimal } from '../../js/animalnet.js';
+const q = new URLSearchParams(location.search), key = q.get('species') || 'dog';
+const BASE = new URL('../../', location.href).href;
+try {
+  const [meta, bin] = await Promise.all([fetch(BASE + 'data/animal/dognet.json').then((r) => r.json()), fetch(BASE + 'data/animal/dognet.bin').then((r) => r.arrayBuffer())]);
+  const net = new DogNet(meta, bin), scene = new THREE.Scene(), a = new NeuralAnimal(THREE, scene, key, net);
+  const SCRIPT = [[0, null, 'run'], [2, [0, 1], 'walk'], [6, [0, 1], 'run'], [10, [1, 0], 'run'], [13, [0, 1], 'sprint'], [17, [-1, 0], 'run'],
+    [20, null, 'run'], [22, null, 'run', 'duck'], [26, null, 'run', 'stand_up'], [29, null, 'run', 'jump'], [31, [0, 1], 'run', 'jump'], [33, null, 'run'], [34, null, 'run', 'block'], [36.5, null, 'run'], [38, null, 'end']];
+  const dt = 1 / 60, rec = [], P = a.P, paws = meta.paws.map((n) => a.ix[n]);
+  let lastSeg = -1, t = 0, worst = 0, msNet = []; const dump = [];
+  while (true) {
+    let c = SCRIPT[0]; for (const s of SCRIPT) if (t >= s[0]) c = s;
+    if (c[2] === 'end') break;
+    const seg = SCRIPT.indexOf(c), cmd = { move: c[1] || [0, 0], gait: c[2], action: c[3] && seg !== lastSeg ? c[3] : null }; lastSeg = seg;
+    const clk = a.clock, t0 = performance.now(); a.update(cmd, dt); msNet.push(performance.now() - t0);
+    if (q.has('dump') && a.clock !== clk) dump.push({ t: +t.toFixed(3), v: +Math.hypot(a.rootVel[0], a.rootVel[1]).toFixed(3), p: Array.from(a.pose, (x) => +x.toFixed(4)) });
+    const w = a.world;
+    for (let i = 0; i < w.length; i++) if (!Number.isFinite(w[i])) worst = Infinity; else worst = Math.max(worst, Math.abs(w[i] - (i % 3 === 0 ? a.pos[0] * a.scale : i % 3 === 2 ? a.pos[1] * a.scale : 0)));
+    rec.push({ t, w: Array.from(w), c: a.contacts.slice(), speed: a.speed, lie: a.lieS, want: c[1] ? c[2] : 'stop' });
+    t += dt;
+  }
+  // metrics
+  const seg = (lo, hi) => rec.filter((r) => r.t >= lo && r.t < hi);
+  const avgSpeed = (lo, hi) => { const s = seg(lo, hi); return s.reduce((x, r) => x + r.speed, 0) / s.length; };
+  let slideSum = 0, slideN = 0;
+  for (let i = 1; i < rec.length; i++) for (let k = 0; k < 4; k++) if (rec[i].c[k] > 0.5 && rec[i - 1].c[k] > 0.5) {
+    const j = paws[k] * 3, d = Math.hypot(rec[i].w[j] - rec[i - 1].w[j], rec[i].w[j + 2] - rec[i - 1].w[j + 2]); slideSum += d / dt; slideN++;
+  }
+  const hipsY = (lo, hi) => { const s = seg(lo, hi); return s.reduce((x, r) => x + r.w[a.ix.Hips * 3 + 1], 0) / s.length; };
+  const maxHipsY = (lo, hi) => Math.max(...seg(lo, hi).map((r) => r.w[a.ix.Hips * 3 + 1]));
+  // paw pops: largest horizontal paw acceleration and its 99th percentile (m/s^2), all paws, all frames
+  const pawAcc = []; for (let i = 2; i < rec.length; i++) for (const j of paws) { const ax = rec[i].w[j * 3] - 2 * rec[i - 1].w[j * 3] + rec[i - 2].w[j * 3], az = rec[i].w[j * 3 + 2] - 2 * rec[i - 1].w[j * 3 + 2] + rec[i - 2].w[j * 3 + 2]; pawAcc.push(Math.hypot(ax, az) / dt / dt); }
+  pawAcc.sort((x, y) => x - y);
+  let stancePawSlide = 0, stanceN = 0; // slide of paws that are planted (contact > 0.5) while the body moves (> 0.5 m/s)
+  for (let i = 1; i < rec.length; i++) if (rec[i].speed > 0.5) for (let k = 0; k < 4; k++) if (rec[i].c[k] > 0.5 && rec[i - 1].c[k] > 0.5) { const j = paws[k] * 3; stancePawSlide += Math.hypot(rec[i].w[j] - rec[i - 1].w[j], rec[i].w[j + 2] - rec[i - 1].w[j + 2]) / dt; stanceN++; }
+  let jerkMax = 0; for (let i = 2; i < rec.length; i++) for (let j = 0; j < P; j++) { const v1 = rec[i].w[j * 3 + 1] - rec[i - 1].w[j * 3 + 1], v0 = rec[i - 1].w[j * 3 + 1] - rec[i - 2].w[j * 3 + 1]; jerkMax = Math.max(jerkMax, Math.abs(v1 - v0) / dt / dt); }
+  const ms = msNet.slice().sort((x, y) => x - y);
+  window.RESULT = { species: key, frames: rec.length, finite: worst !== Infinity, maxJointOffsetFromRoot: +worst.toFixed(2),
+    speed: { idle: +avgSpeed(0.5, 2).toFixed(2), walk: +avgSpeed(3.5, 6).toFixed(2), run: +avgSpeed(7.5, 10).toFixed(2), sprint: +avgSpeed(14.5, 17).toFixed(2), stop: +avgSpeed(21, 22).toFixed(2) },
+    hipsHeight: { stand: +hipsY(0.5, 2).toFixed(3), lie: +hipsY(24, 26).toFixed(3), standAgain: +hipsY(28, 29).toFixed(3), jumpMax: +maxHipsY(29, 31).toFixed(3), runJumpMax: +maxHipsY(31, 33).toFixed(3) },
+    chestAboveHips: { getUp: +Math.max(...seg(26, 29).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3), idle: +Math.max(...seg(0.5, 2).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3), rear: +Math.max(...seg(34, 36).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3) },
+    contactPawSlideMs: +(slideSum / Math.max(1, slideN)).toFixed(3), movingPawSlideMs: +(stancePawSlide / Math.max(1, stanceN)).toFixed(3), pawAccP99: +pawAcc[Math.floor(pawAcc.length * 0.99)].toFixed(1), pawAccMax: +pawAcc[pawAcc.length - 1].toFixed(1), verticalAccelMax: +jerkMax.toFixed(1), stepMsP50: +ms[ms.length >> 1].toFixed(2), stepMsP99: +ms[Math.floor(ms.length * 0.99)].toFixed(2),
+    dump: q.has('dump') ? dump : undefined,
+    trace: q.has('trace') ? rec.filter((_, i) => i % 6 === 0).map((r) => ({ t: +r.t.toFixed(2), w: r.w.map((v) => +v.toFixed(3)) })) : undefined };
+} catch (e) { window.RESULT = { error: String(e && e.stack || e) }; }
+</script>

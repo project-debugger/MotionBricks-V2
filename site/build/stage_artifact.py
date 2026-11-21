@@ -34,9 +34,11 @@ def main():
         for f in files:
             shutil.copy(SITE / sub / f, out / sub / f)
         shutil.copy(SITE / sub / "LICENSE", out / sub / "LICENSE.txt")
-    (out / "data").mkdir()
-    for f in (SITE / "data").iterdir():
-        shutil.copy(f, out / "data" / (f.stem + ".wasm" if f.suffix == ".bin" else f.name))
+    for f in (SITE / "data").rglob("*"):
+        if f.is_file():
+            dst = out / f.relative_to(SITE).with_suffix(".wasm" if f.suffix == ".bin" else f.suffix)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(f, dst)
     manifest = json.loads((SITE / "models/models.json").read_text())
     manifest["models"] = {k: manifest["models"][k] for k in a.models}
     for k, m in manifest["models"].items():

@@ -96,6 +96,8 @@ export class Animal {
     this.placeFeet(true);
   }
   setVisible(v) { this.root.visible = v; }
+  teleport(x, z, yaw) { this.pos.set(x, 0, z); this.yaw = yaw; this.speed = 0; this.placeFeet(); this.tailPrev = null; this.mode = 'stand'; this.action = null; }
+  worldXZ() { return [this.pos.x, this.pos.z]; }
   dispose() { this.root.removeFromParent(); }
   // neutral foot position in the root frame (x side, z along body)
   neutral(leg) {

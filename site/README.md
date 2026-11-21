@@ -122,17 +122,37 @@ arm, chambered and extended leg, forearms up) that the SOMA network moves into f
 motion and back out of to the stance; from standing (and jab / cross / front kick from walking)
 they are in the instant-transition bank, otherwise they are generated live.
 
-## Animals
+## Animals (trained network)
 
 Settings, Character: Dog, Wolf, Fox, Cat, Horse, Deer, Bear, Elephant, Rabbit, Lion (or "Play an
-animal" on the start screen, no model download). The SOMA network only knows human motion, so the
-animals are procedural: walk / trot / gallop foot patterns (hopping for the rabbit) blended by
-speed, planted feet with swing arcs, two-bone leg IK with species joint directions and a folding
-foot segment, a spine that bends into turns and flexes in the gallop, a head that looks where it
-is going and scans when idle, spring-driven tails (wagging), ear flicks and breathing. Buttons
-map to species actions: jump, attack (bite / paw swipe / rear up / charge), kick (pounce / buck /
-stomp), block (defensive crouch), dodge (side-step), sit, lie down (Duck), stalk (Crouch), gallop
-(Sprint). Bodies are built from smooth primitives at runtime.
+animal" on the start screen, no model download). The SOMA network only knows human motion and was
+released without training code, so the animals have their own network, trained here from scratch:
+
+- **Data**: 41 minutes of dog motion capture from Zhang, Starke, Komura and Saito, "Mode-Adaptive
+  Neural Networks for Quadruped Motion Control" (SIGGRAPH 2018), CC BY-NC 4.0 (non-commercial use
+  only). 51 clips at 60 fps, mirrored left/right; about 3 minutes where the dog stands on a raised
+  surface are dropped. Three actions are labelled automatically from the posture: lying down, leaping
+  (flight phases at speed) and rearing up on the hind legs (about 4 minutes of the data).
+- **Model** (`tools/animal/train_mann.py`): a gating network blends 4 expert MLPs (2 hidden layers
+  of 256) per frame. Input: 1 s of past path, 1 s of future path (the network's own prediction
+  blended with the player's joystick) with the action labels, the current joint positions and
+  velocities. Output: the next pose, root motion, the future path and paw contacts. 0.77 M weights,
+  1.5 MB as float16; trained for 100 epochs (16 minutes) on 253,336 samples on this machine's CPU;
+  validation loss 0.24 on 5 held-out clips (training loss 0.08).
+- **Runtime** (`js/animalnet.js`): evaluated every frame in plain JavaScript (about 1.5 ms; matches
+  PyTorch to 1e-6), bone lengths kept. Paws the network marks as in contact stay planted (up to
+  10 cm of lag before they slide, never beyond the leg's reach) with two-bone leg IK.
+- **Measured** (`build/test/animal_sim.html`, dog): frame-to-frame joint acceleration of the network
+  output is at or below the real mocap's in every gait (walk 1.7 vs 2.5 mm/frame², trot 5.3 vs
+  5.5, gallop 6.7 vs 7.6), so the motion is as smooth as the recording. Planted paws slide
+  0.15 m/s while moving (the recording: 0.10 m/s; before planting: 0.38 m/s).
+- **Bodies** are primitive shapes placed on the network's skeleton: the chest reaches the shoulder
+  joints and the elbows, the rump covers the hip joints; width and length follow each species.
+- **Other species** reuse the dog-trained motion on their own body proportions (legs, body, neck,
+  head, tail lengths) and are time-scaled by size, so larger animals step more slowly.
+- Controls: move, Sprint (fast gait), Jump (leap), Punch / Kick (pounce), Dodge (side jump),
+  Block (rear up; from a run the animal pulls up first), Duck or Sit (lie down / get up). The
+  elephant rears instead of jumping. Settings can switch back to the earlier procedural animation.
 
 ## Slow devices (phones)
 
@@ -218,7 +238,8 @@ js/library.js           continuous mocap clips with stride phase (target selecti
 js/bank.js              transition bank + motion-matching features
 js/body.js              muscles, breathing, soft tissue (vertex shader)
 js/fight.js             fighting key poses (IK on the idle pose)
-js/animals.js           procedural animals (10 species)
+js/animals.js           species shapes + the earlier procedural animal animation
+js/animalnet.js         trained animal network: JS inference, control loop, paw planting, bodies
 js/settings.js          presets and defaults
 js/codec.js             SOMA encode/decode, endpoint correction, velocity matching, joint limits
 js/math3d.js            quaternion and pose helpers

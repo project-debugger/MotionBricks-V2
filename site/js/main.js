@@ -9,6 +9,7 @@ import { TransitionBank } from './bank.js';
 import { BodyFX } from './body.js';
 import { registerFightActions } from './fight.js';
 import { Animal, SPECIES, SPECIES_KEYS } from './animals.js';
+import { DogNet, NeuralAnimal } from './animalnet.js';
 import { PRESETS, DEFAULTS } from './settings.js';
 
 const $ = (s) => document.querySelector(s);
@@ -190,7 +191,8 @@ function buildPanel(models, onModel, onCharacter) {
   const crow = [['human', 'Human', 'SOMA network'], ...SPECIES_KEYS.map((k) => [k, SPECIES[k].name, 'procedural'])].map(([k, n, sub]) => `<button class="seg" data-char="${k}">${n}<small>${sub}</small></button>`).join('');
   const mrow = Object.entries(models).map(([k, m]) => `<button class="seg" data-model="${k}" ${m.available ? '' : 'disabled'}>${m.short}<small>${(m.bytes / 1e6).toFixed(0)} MB</small></button>`).join('');
   p.innerHTML = `<h3>Character</h3><div class="segs" id="chars">${crow}</div>
-    <p class="note" style="margin-top:6px">Animals are animated by a procedural gait system: the SOMA network only knows human motion.</p>
+    <p class="note" style="margin-top:6px">Animals move with a neural network trained here on 41 minutes of dog motion capture (MANN dog data, CC BY-NC 4.0); other species reuse it on their own body proportions. The SOMA network only knows human motion.</p>
+    <label class="tg"><input id="t-procAnimals" type="checkbox"><span>Use the old procedural animal animation instead</span></label>
     <h3>Model</h3><div class="segs" id="models">${mrow}</div>
     <h3>Preset</h3><div class="segs" id="presets">${Object.keys(PRESETS).map((k) => `<button class="seg" data-preset="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
     <h3>Tuning</h3>${SLIDERS.map(([k, l, a, b, st, u]) => `<label class="sl"><span>${l} <b id="v-${k}"></b></span><input id="s-${k}" type="range" min="${a}" max="${b}" step="${st}" data-unit="${u}"></label>`).join('')}
@@ -204,12 +206,14 @@ function buildPanel(models, onModel, onCharacter) {
     for (const [k] of SLIDERS) { const el = $(`#s-${k}`); el.value = S[k]; $(`#v-${k}`).textContent = `${(+S[k]).toFixed(el.step < 1 ? 2 : 0)} ${el.dataset.unit}`; }
     for (const [k] of TOGGLES) $(`#t-${k}`).checked = !!S[k];
     $('#t-dur').checked = S.durationMode === 'model';
+    $('#t-procAnimals').checked = S.animalMotion === 'procedural';
   };
   p.addEventListener('input', (e) => {
     const id = e.target.id;
     if (id.startsWith('s-')) { S[id.slice(2)] = +e.target.value; S.preset = 'custom'; }
-    else if (id.startsWith('t-') && id !== 't-dur') S[id.slice(2)] = e.target.checked;
+    else if (id.startsWith('t-') && id !== 't-dur' && id !== 't-procAnimals') S[id.slice(2)] = e.target.checked;
     else if (id === 't-dur') S.durationMode = e.target.checked ? 'model' : 'horizon';
+    else if (id === 't-procAnimals') { S.animalMotion = e.target.checked ? 'procedural' : 'network'; if (onCharacter && S.character !== 'human') onCharacter(S.character); }
     save(); sync();
   });
   p.addEventListener('click', (e) => {
@@ -230,6 +234,8 @@ async function main() {
   const [skel, lim, wmeta, wbin, mmeta, mbin, models, cmeta, cbin, bmeta, bbin] = await Promise.all([getJSON('data/skeleton.json'), getJSON('data/joint_limits.json'),
     getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/soma_mesh.json'), getBin('data/soma_mesh.bin'), getJSON('models/models.json'),
     getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('data/bank.json'), getBin('data/bank.bin')]);
+  let dogNet = null;
+  try { const [dm, db] = await Promise.all([getJSON('data/animal/dognet.json'), getBin('data/animal/dognet.bin')]); dogNet = new DogNet(dm, db); } catch (e) { console.warn('animal network unavailable', e); }
   const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
   const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk);
   const fightPoses = registerFightActions(sk, lib, wmeta.actions, limits);
@@ -280,7 +286,7 @@ async function main() {
   const ctrl = new Controller({ sk, lib, clips, bank, limits, settings: () => S, generate, actions: wmeta.actions });
   // characters: the SOMA human, or a procedural animal standing where the current character is
   const animals = {}; let animal = null, modelRequested = false;
-  const focus = () => (animal ? [animal.pos.x, animal.pos.z, animal.yaw] : (() => { const w = M.fk(ctrl.display || ctrl.buffer[3], sk.parents); return [w[0], w[2], ctrl.simYaw]; })());
+  const focus = () => (animal ? [...animal.worldXZ(), animal.yaw] : (() => { const w = M.fk(ctrl.display || ctrl.buffer[3], sk.parents); return [w[0], w[2], ctrl.simYaw]; })());
   const setCharacter = (key) => {
     const [fx, fz, fyaw] = focus();
     S.character = key; save();
@@ -292,10 +298,12 @@ async function main() {
       if (!ready && !modelRequested) { $('#loading').hidden = false; $('#start').hidden = false; $('#go').hidden = false; }
     } else {
       R.body.visible = false; R.chair.visible = false;
-      animal = animals[key] || (animals[key] = new Animal(THREE, R.scene, key));
-      animal.pos.set(fx, 0, fz); animal.yaw = fyaw; animal.speed = 0; animal.placeFeet(); animal.tailPrev = null; animal.mode = 'stand'; animal.setVisible(true);
+      const neural = S.animalMotion !== 'procedural' && dogNet;
+      const ck = `${key}:${neural ? 'net' : 'proc'}`;
+      animal = animals[ck] || (animals[ck] = neural ? new NeuralAnimal(THREE, R.scene, key, dogNet) : new Animal(THREE, R.scene, key));
+      animal.teleport(fx, fz, fyaw); animal.setVisible(true);
       input.sitting = false; $('#b-sit').classList.remove('on');
-      $('#hud-model').textContent = `${SPECIES[key].name} - procedural animal`;
+      $('#hud-model').textContent = `${SPECIES[key].name} - ${animal instanceof NeuralAnimal ? 'trained network (dog mocap)' : 'procedural'}`;
       $('#loading').hidden = true;
     }
     document.body.classList.toggle('animal', !!animal);
@@ -323,6 +331,7 @@ async function main() {
     const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now; // stays real-time down to 10 fps
     let pose;
     if (animal) {
+      if (window.SOMA_HIDE_LANDMARKS) for (const b of R.landmarks) b.visible = false; // debug captures
       if (!window.SOMA_FREEZE) animal.update(command(dt), dt);
       const t = animal.target, k = 1 - Math.exp(-dt * 6), sc = Math.min(2.6, Math.max(0.28, animal.size / 0.85));
       camT.x += (t.x - camT.x) * k; camT.z += (t.z - camT.z) * k;
