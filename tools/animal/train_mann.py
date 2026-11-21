@@ -186,6 +186,8 @@ def main() -> int:
     ap.add_argument("--hidden", type=int, default=256)
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--noise", type=float, default=0.0, help="std of Gaussian noise added to the (normalised) input pose and velocities: teaches the network to recover from its own small errors when it runs on its own output")
+    ap.add_argument("--keep-best", action="store_true", help="export the epoch with the lowest validation loss")
     a = ap.parse_args()
     torch.set_num_threads(a.threads)
     torch.manual_seed(0); np.random.seed(0)
@@ -213,18 +215,25 @@ def main() -> int:
     hist = []
     budget = a.minutes * 60
     for ep in range(a.epochs):
-        model.train(); perm = torch.randperm(n); tl = 0.0; te = time.time()
+        model.train(); perm = torch.randperm(n); tl = 0.0; te = time.time(); pose0 = len(OFFS) * TS
         for s in range(steps_per_epoch):
             b = perm[s * a.batch:(s + 1) * a.batch]
-            loss = nn.functional.mse_loss(model(Gn[b], Xn[b]), Yn[b])
+            xb = Xn[b]
+            if a.noise > 0:
+                xb = xb.clone(); xb[:, pose0:] += a.noise * torch.randn_like(xb[:, pose0:])
+            loss = nn.functional.mse_loss(model(Gn[b], xb), Yn[b])
             opt.zero_grad(set_to_none=True); loss.backward(); opt.step(); sched.step(); tl += loss.item() * len(b)
         model.eval()
         with torch.no_grad():
             vl = float(np.mean([nn.functional.mse_loss(model(Gvn[i:i + 4096], Xvn[i:i + 4096]), Yvn[i:i + 4096]).item() for i in range(0, len(Xvn), 4096)]))
         hist.append({"epoch": ep + 1, "train": tl / n, "val": vl, "seconds": time.time() - te})
+        if a.keep_best and vl <= min(h["val"] for h in hist):
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         print(f"epoch {ep + 1}/{a.epochs} train {tl / n:.4f} val {vl:.4f} ({time.time() - te:.0f} s, total {(time.time() - t0) / 60:.1f} min)", flush=True)
         if time.time() - t0 > budget:
             print("time budget reached", flush=True); break
+    if a.keep_best:
+        model.load_state_dict(best_state); print(f"exporting best epoch {min(hist, key=lambda h: h['val'])['epoch']}", flush=True)
     export(model, stats, names, clips[0][1], a, hist, len(X), len(Xv), sorted(val_names), standing_pose(X, ix))
     return 0
 

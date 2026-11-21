@@ -37,7 +37,7 @@ def main():
         shutil.copy(SITE / sub / "LICENSE", out / sub / "LICENSE.txt")
     for f in (SITE / "data").rglob("*"):
         if f.is_file():
-            dst = out / f.relative_to(SITE).with_suffix(".wasm" if f.suffix in (".bin", ".glb") else f.suffix)
+            dst = out / f.relative_to(SITE).with_suffix(".wasm" if f.suffix in (".bin", ".glb", ".gguf") else f.suffix)
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(f, dst)
     manifest = json.loads((SITE / "models/models.json").read_text())

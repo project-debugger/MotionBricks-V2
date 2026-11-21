@@ -10,6 +10,7 @@ import { BodyFX } from './body.js';
 import { registerFightActions } from './fight.js';
 import { Animal, SPECIES } from './animals.js';
 import { DogNet, NeuralAnimal } from './animalnet.js';
+import { readGGUF } from './gguf.js';
 import { ANIMAL_MODELS, loadAnimalModel } from './animalmesh.js';
 import { PRESETS, DEFAULTS } from './settings.js';
 
@@ -27,7 +28,7 @@ async function getJSON(p) { const r = await fetch(BASE + p); if (!r.ok) throw ne
 // hosts that refuse .bin files (claude.ai artifacts) serve the same bytes under another extension
 const BIN_EXT = document.querySelector('meta[name="soma-bin-ext"]')?.content || '.bin';
 async function getBin(p) { p = p.replace(/\.bin$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
-async function getGlb(p) { if (BIN_EXT !== '.bin') p = p.replace(/\.glb$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
+async function getGlb(p) { if (BIN_EXT !== '.bin') p = p.replace(/\.(glb|gguf)$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
 
 // ------------------------------------------------------------------ renderer
 function gridTexture() {
@@ -238,7 +239,7 @@ async function main() {
     getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/soma_mesh.json'), getBin('data/soma_mesh.bin'), getJSON('models/models.json'),
     getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('data/bank.json'), getBin('data/bank.bin')]);
   let dogNet = null;
-  try { const [dm, db] = await Promise.all([getJSON('data/animal/dognet.json'), getBin('data/animal/dognet.bin')]); dogNet = new DogNet(dm, db); } catch (e) { console.warn('animal network unavailable', e); }
+  try { const { meta, buffer } = readGGUF(await getGlb('data/animal/animalnet.gguf')); dogNet = new DogNet(meta, buffer); } catch (e) { console.warn('animal network unavailable', e); }
   const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
   const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk);
   const fightPoses = registerFightActions(sk, lib, wmeta.actions, limits);

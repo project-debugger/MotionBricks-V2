@@ -17,6 +17,7 @@ const DOG_HIP = 0.469, DOG_HIND = 0.448; // network rest: Hips height, hind leg 
 //   front.L/R: [scapula|null, upper arm, forearm, metacarpus|null] + tip (toe tip, one name or several averaged)
 //   hind.L/R:  [thigh, shin, metatarsus|null] + tip; tail: base to tip
 // carriage: 'model' keeps the species' own neck/head carriage (moved by the network's neck motion), default is the dog's
+// style: speed (gait speed factor), cadence (step-rate factor on top of size), maxGait 'run' (no gallop), bound (paired legs: hopping)
 export const ANIMAL_MODELS = {
   dog: {
     name: 'Dog', file: 'dog.glb', hips: 0.40,
@@ -45,7 +46,7 @@ export const ANIMAL_MODELS = {
     },
   },
   fox: {
-    name: 'Fox', file: 'fox.glb', hips: 0.36,
+    name: 'Fox', file: 'fox.glb', hips: 0.36, style: { cadence: 1.08 },
     credit: { title: 'Fox', author: 'alexanders823', license: 'CC BY 4.0', url: 'https://sketchfab.com/3d-models/4e37c303f8a241aaa2511bd9f3019273' },
     rig: {
       root: 'Fox__01', pelvis: 'Fox_ Pelvis_02', spine: ['Fox_ Spine_011', 'Fox_ Spine1_012'],
@@ -58,7 +59,7 @@ export const ANIMAL_MODELS = {
     },
   },
   cat: {
-    name: 'Cat', file: 'cat.glb', hips: 0.25,
+    name: 'Cat', file: 'cat.glb', hips: 0.25, style: { cadence: 1.1 },
     credit: { title: 'Cat - Walking', author: 'pamoan10', license: 'CC BY-NC 4.0', url: 'https://sketchfab.com/3d-models/827aa2c7951747599629700703050673' },
     rig: {
       root: 'CATRigHub001_01', pelvis: 'CATRigHub001_01', spine: ['CATRigSpine1_010', 'CATRigSpine7_011', 'CATRigSpine8_012', 'CATRigSpine4_013', 'CATRigSpine5_014', 'CATRigHub002_015'],
@@ -71,7 +72,7 @@ export const ANIMAL_MODELS = {
     },
   },
   horse: {
-    name: 'Horse', file: 'horse.glb', hips: 1.45,
+    name: 'Horse', file: 'horse.glb', hips: 1.45, style: { speed: 1.15 },
     credit: { title: 'Horse', author: 'alainsorazu', license: 'CC BY-SA 4.0', url: 'https://sketchfab.com/3d-models/bef74ed402cc40e996eea028668d3c1c' },
     rig: {
       root: 'spine.001_69', pelvis: 'spine.001_69', spine: ['spine.002_68', 'spine.003_54', 'spine.004_52', 'spine.005_51', 'spine.006_35'],
@@ -83,7 +84,7 @@ export const ANIMAL_MODELS = {
     },
   },
   bear: {
-    name: 'Brown bear', file: 'bear.glb', hips: 0.95,
+    name: 'Brown bear', file: 'bear.glb', hips: 0.95, style: { speed: 0.85, cadence: 0.92 },
     credit: { title: 'Bear', author: 'Nyilonelycompany', license: 'CC BY 4.0', url: 'https://sketchfab.com/3d-models/ce0d5eb86cf5459bb6bd20244cb44b27' },
     rig: {
       root: 'spine.004_02', pelvis: 'spine.004_02', spine: ['spine.005_04', 'spine.006_05', 'spine.007_06', 'spine.008_07'],
@@ -95,7 +96,7 @@ export const ANIMAL_MODELS = {
     },
   },
   elephant: {
-    name: 'Elephant', file: 'elephant.glb', hips: 2.3,
+    name: 'Elephant', file: 'elephant.glb', hips: 2.3, style: { maxGait: 'run', speed: 0.8, cadence: 0.9 },
     credit: { title: 'walking elephant', author: 'syaharanichan', license: 'CC BY 4.0', url: 'https://sketchfab.com/3d-models/2705e7483341479e8015d996cd766611' },
     rig: {
       root: 'Bone_Armature.001', pelvis: 'Bone.023_Armature.001', spine: ['Bone.020_Armature.001', 'Bone.019_Armature.001', 'Bone.018_Armature.001'],
@@ -107,7 +108,7 @@ export const ANIMAL_MODELS = {
     },
   },
   tiger: {
-    name: 'Tiger', file: 'tiger.glb', hips: 0.88,
+    name: 'Tiger', file: 'tiger.glb', hips: 0.88, style: { speed: 0.95, cadence: 0.95 },
     credit: { title: 'Running Tiger', author: 'francescolima74', license: 'CC BY 4.0', url: 'https://sketchfab.com/3d-models/fc2c7fd74dd04e39935803b884c77258' },
     rig: {
       root: 'Bip01 Pelvis_01', pelvis: 'Bip01 Pelvis_01', spine: ['Bip01 Spine_02', 'Bip01 Spine1_03', 'Bip01 Spine2_04'],
@@ -132,7 +133,7 @@ export const ANIMAL_MODELS = {
     },
   },
   rabbit: {
-    name: 'Rabbit', file: 'rabbit.glb', hips: 0.17,
+    name: 'Rabbit', file: 'rabbit.glb', hips: 0.17, style: { bound: true, cadence: 1.15 },
     credit: { title: 'Rabbit Rigged', author: 'FourthGreen', license: 'CC BY 4.0', url: 'https://sketchfab.com/3d-models/e7213589744d436b9d96e2dbb31198a5' },
     rig: {
       root: 'Root_M_02', pelvis: 'Root_M_02', spine: ['Spine1_M_011', 'Spine2_M_012', 'Chest_M_013'],
@@ -180,7 +181,16 @@ export class AnimalModel {
     this.restQ = new Map(this.driven.map((o) => [o, o.getWorldQuaternion(new T.Quaternion())]));
     this.restP = new Map(this.driven.map((o) => [o, P(o)]));
     this.restLocal = new Map(this.driven.map((o) => [o, { p: o.position.clone(), q: o.quaternion.clone() }]));
-    for (const l of [this.front.L, this.front.R, this.hind.L, this.hind.R]) { l.tip0 = tipP(l); const e = l.bones[l.bones.length - 1]; l.metaLen = e ? l.tip0.distanceTo(this.restP.get(e)) : 0; }
+    for (const l of [this.front.L, this.front.R, this.hind.L, this.hind.R]) {
+      l.tip0 = tipP(l); const e = l.bones[l.bones.length - 1]; l.metaLen = e ? l.tip0.distanceTo(this.restP.get(e)) : 0;
+      // toe bone between the paw bone and the tip: kept at its standing angle while the paw is planted
+      const end = e || l.bones[l.bones.length - 2]; let t = l.tip[0];
+      while (t && t.parent && t.parent !== end) t = t.parent;
+      if (t && t.parent === end && t !== l.tip[0]) {
+        l.toe = t; l.toeP0 = P(t); l.toeQ0 = t.getWorldQuaternion(new T.Quaternion());
+        const d = l.tip0.clone().sub(l.toeP0).normalize(); l.toeElev0 = Math.asin(Math.max(-1, Math.min(1, d.y)));
+      }
+    }
     const fwd0 = P(this.head).sub(P(this.pelvis)).setY(0).normalize();
     this.nose0 = this.noseB.length ? this.noseB.reduce((a, o) => a.add(P(o)), new T.Vector3()).multiplyScalar(1 / this.noseB.length) : this.autoNose(gltf.scene, this.head, fwd0);
     // torso chain pelvis -> spine -> first neck bone, and the point matching the network's Spine1 (0.19 of 0.415)
@@ -215,7 +225,7 @@ export class AnimalModel {
   }
   setWorldQ(o, q) { const pq = this.tmp.q2; o.parent.getWorldQuaternion(pq); o.quaternion.copy(pq.invert().multiply(q)); o.updateWorldMatrix(false, false); }
   // W: network joint positions (world, model proportions), ix: name -> index, rest: { pelvis frame and tail direction at rest }
-  apply(W, ix, rest) {
+  apply(W, ix, rest, contacts) {
     const T = this.T, V = (n) => { const i = ix[n] * 3; return new T.Vector3(W[i], W[i + 1], W[i + 2]); };
     const hips = V('Hips'), sp1 = V('Spine1'), neck = V('Neck'), head = V('Head'), headEnd = V('HeadEnd');
     const hindL = V('LeftUpLeg').sub(V('RightUpLeg')).normalize(), frontL = V('LeftShoulder').sub(V('RightShoulder')).normalize();
@@ -274,6 +284,16 @@ export class AnimalModel {
         const tip = tipT, E = e.getWorldPosition(new T.Vector3()), cur = this.tipNow(l, e).sub(E);
         const q = new T.Quaternion().setFromUnitVectors(cur.normalize(), tip.sub(E).normalize()), wq = e.getWorldQuaternion(new T.Quaternion());
         this.setWorldQ(e, q.multiply(wq));
+      }
+      // planted paw: toes back at their standing angle (the paw presses flat instead of pivoting as one block)
+      const c = contacts ? contacts[limbs.findIndex((x) => x[0] === kind && x[1] === s)] : 0, w = Math.max(0, Math.min(1, (c - 0.3) / 0.4));
+      if (l.toe && w > 0) {
+        const t = l.toe, tq = t.getWorldQuaternion(new T.Quaternion()), tp = t.getWorldPosition(new T.Vector3());
+        const cur = l.tip0.clone().sub(l.toeP0).applyQuaternion(l.toeQ0.clone().invert()).applyQuaternion(tq).normalize();
+        const h = new T.Vector3(cur.x, 0, cur.z); if (h.lengthSq() < 1e-6) continue; h.normalize();
+        const want = h.multiplyScalar(Math.cos(l.toeElev0)).add(new T.Vector3(0, Math.sin(l.toeElev0), 0));
+        const dir = cur.clone().lerp(want, w).normalize();
+        this.setWorldQ(t, new T.Quaternion().setFromUnitVectors(cur, dir).multiply(tq)); void tp;
       }
     }
   }

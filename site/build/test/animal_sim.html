@@ -8,10 +8,11 @@
 import * as THREE from 'three';
 import { DogNet, NeuralAnimal } from '../../js/animalnet.js';
 import { loadAnimalModel } from '../../js/animalmesh.js';
+import { readGGUF } from '../../js/gguf.js';
 const q = new URLSearchParams(location.search), key = q.get('species') || 'dog';
 const BASE = new URL('../../', location.href).href;
 try {
-  const [meta, bin] = await Promise.all([fetch(BASE + 'data/animal/dognet.json').then((r) => r.json()), fetch(BASE + 'data/animal/dognet.bin').then((r) => r.arrayBuffer())]);
+  const { meta, buffer: bin } = readGGUF(await fetch(BASE + (q.get('net') || 'data/animal/animalnet.gguf')).then((r) => r.arrayBuffer()));
   // ?model=1: drive the realistic skinned model too (its bone update is then part of the step time)
   const model = q.has('model') ? await loadAnimalModel(THREE, key, (p) => fetch(BASE + p).then((r) => r.arrayBuffer())) : null;
   const net = new DogNet(meta, bin), scene = new THREE.Scene(), a = new NeuralAnimal(THREE, scene, key, net, model);
@@ -27,7 +28,7 @@ try {
     if (q.has('dump') && a.clock !== clk) dump.push({ t: +t.toFixed(3), v: +Math.hypot(a.rootVel[0], a.rootVel[1]).toFixed(3), p: Array.from(a.pose, (x) => +x.toFixed(4)) });
     const w = a.world;
     for (let i = 0; i < w.length; i++) if (!Number.isFinite(w[i])) worst = Infinity; else worst = Math.max(worst, Math.abs(w[i] - (i % 3 === 0 ? a.pos[0] * a.scale : i % 3 === 2 ? a.pos[1] * a.scale : 0)));
-    rec.push({ t, w: Array.from(w), c: a.contacts.slice(), speed: a.speed, lie: a.lieS, want: c[1] ? c[2] : 'stop' });
+    rec.push({ t, w: Array.from(w), c: (a.pawC || a.contacts).slice(), speed: a.speed, lie: a.lieS, want: c[1] ? c[2] : 'stop' });
     t += dt;
   }
   // metrics

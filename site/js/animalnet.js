@@ -77,6 +77,7 @@ export class NeuralAnimal {
     this.ix = Object.fromEntries(this.names.map((n, i) => [n, i]));
     const sp = this.sp;
     this.scale = (model ? model.hips : sp.hip) / DOG_HIP; this.size = model ? model.hips * 1.05 : Math.max(sp.hip, sp.sh); this.timeScale = 1 / Math.sqrt(this.scale);
+    this.style = model?.cfg.style || {}; this.timeScale *= this.style.cadence || 1; // per-species step rate on top of size
     // per-bone length factors: legs, body, neck/head, tail follow the species proportions
     const dogFront = 0.152 + 0.178 + 0.072, dogHind = 0.16 + 0.18 + 0.108;
     const legF = (sp.front[0] + sp.front[1] + sp.front[2]) / (this.scale * dogFront), legH = (sp.hind[0] + sp.hind[1] + sp.hind[2]) / (this.scale * dogHind);
@@ -146,7 +147,7 @@ export class NeuralAnimal {
     this.nL = m.labels.length;
     this.hist = []; for (let k = 0; k < 61; k++) this.hist.push({ x, z, yaw, vx: 0, vz: 0, lab: new Array(this.nL).fill(0) });
     this.future = m.future.map((o) => ({ x: x + Math.sin(yaw) * 0, z, dx: Math.sin(yaw), dz: Math.cos(yaw), vx: 0, vz: 0 }));
-    this.contacts = [1, 1, 1, 1]; this.acc = 0; this.lie = 0; this.jumpAt = -10; this.clock = 0;
+    this.contacts = [1, 1, 1, 1]; this.pawC = this.contacts; this.acc = 0; this.lie = 0; this.jumpAt = -10; this.clock = 0;
     this.ground = 0; this.speed = 0;
     this.locks = [0, 1, 2, 3].map(() => ({ on: false, p: null, w: 0, off: [0, 0, 0] }));
     this.world = this.toWorldPose(); this.prevWorld = this.world;
@@ -181,7 +182,8 @@ export class NeuralAnimal {
     const c = this.cmd || { move: [0, 0], gait: 'run' }, mag = Math.min(1, Math.hypot(c.move[0], c.move[1]));
     const rearing = this.clock - this.rearAt > -0.6 && this.clock - this.rearAt < 1.5; // animals stand still to rear up
     if (this.lie > 0.5 || mag < 0.05 || rearing) return { v: [0, 0], yaw: this.yaw, moving: false };
-    const sp = (DOG_SPEED[c.gait] ?? DOG_SPEED.run) * (c.gait === 'walk' || c.gait === 'crouch' ? 1 : mag > 0.6 ? 1 : 0.6);
+    const gait = this.style.maxGait === 'run' && c.gait === 'sprint' ? 'run' : c.gait; // e.g. elephants never gallop
+    const sp = (DOG_SPEED[gait] ?? DOG_SPEED.run) * (this.style.speed || 1) * (gait === 'walk' || gait === 'crouch' ? 1 : mag > 0.6 ? 1 : 0.6);
     const yaw = Math.atan2(c.move[0], c.move[1]);
     return { v: [Math.sin(yaw) * sp, Math.cos(yaw) * sp], yaw, moving: true };
   }
@@ -265,6 +267,7 @@ export class NeuralAnimal {
       return { x: this.pos[0] + wx, z: this.pos[1] + wz, dx: dx / dn, dz: dz / dn, vx: wvx2, vz: wvz2 };
     });
     this.contacts = [Y[r++], Y[r++], Y[r++], Y[r++]];
+    this.pawC = this.style.bound ? [this.contacts[0], this.contacts[0], this.contacts[2], this.contacts[2]] : this.contacts;
     // pose: average of the predicted pose and the previous pose advanced by the predicted velocity
     const prevW = this.toWorldPoseRaw(this.pose, oldPos, oldYaw);
     for (let j = 0; j < P; j++) {
@@ -300,6 +303,15 @@ export class NeuralAnimal {
       const p = this.parents[j], dx = pose[j * 3] - pose[p * 3], dy = pose[j * 3 + 1] - pose[p * 3 + 1], dz = pose[j * 3 + 2] - pose[p * 3 + 2], k = S * this.boneK[j];
       lp[j * 3] = lp[p * 3] + dx * k; lp[j * 3 + 1] = lp[p * 3 + 1] + dy * k; lp[j * 3 + 2] = lp[p * 3 + 2] + dz * k;
     }
+    if (this.style.bound) { // hopping gait: each pair of legs moves together, the left leg leading
+      for (const [root, chain] of [['Arm', ['ForeArm', 'Hand', 'HandEnd']], ['UpLeg', ['Leg', 'Foot', 'FootEnd']]]) {
+        const lr = this.ix['Left' + root] * 3, rr = this.ix['Right' + root] * 3;
+        for (const n of chain) {
+          const l = this.ix['Left' + n] * 3, r = this.ix['Right' + n] * 3;
+          lp[r] = lp[rr] - (lp[l] - lp[lr]); lp[r + 1] = lp[rr + 1] + (lp[l + 1] - lp[lr + 1]); lp[r + 2] = lp[rr + 2] + (lp[l + 2] - lp[lr + 2]);
+        }
+      }
+    }
     if (this.pitch) {
       const c = Math.cos(this.pitch), s = Math.sin(this.pitch), py = lp[1], pz = lp[2];
       for (let j = 0; j < P; j++) { const y = lp[j * 3 + 1] - py, z = lp[j * 3 + 2] - pz; lp[j * 3 + 1] = py + y * c + z * s; lp[j * 3 + 2] = pz - y * s + z * c; }
@@ -309,7 +321,7 @@ export class NeuralAnimal {
   toWorldPose() {
     const P = this.P, c = Math.cos(this.yaw), s = Math.sin(this.yaw), S = this.scale, lp = this.localPose(this.pose);
     // ground: the lowest paw that the network says is in contact sits on the floor (smoothed)
-    let low = Infinity; this.net.meta.paws.forEach((pn, i) => { const y = lp[this.ix[pn] * 3 + 1]; if (this.contacts[i] > 0.5) low = Math.min(low, y); });
+    let low = Infinity; this.net.meta.paws.forEach((pn, i) => { const y = lp[this.ix[pn] * 3 + 1]; if (this.pawC[i] > 0.5) low = Math.min(low, y); });
     if (low === Infinity) { let mn = Infinity; for (const pn of this.net.meta.paws) mn = Math.min(mn, lp[this.ix[pn] * 3 + 1]); low = Math.min(mn, this.ground + 0.0); }
     const pawR = this.model ? this.model.pawR : 0.012 * S;
     this.ground += (low - pawR - this.ground) * 0.25;
@@ -327,7 +339,7 @@ export class NeuralAnimal {
     const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], len = (a) => Math.hypot(a[0], a[1], a[2]);
     const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k], maxLag = 0.1 * this.scale;
     chains.forEach((names, k) => {
-      const [u, kn, an, pw] = names.map((n) => this.ix[n]), L = this.locks[k], c = this.contacts[k], p = G(pw);
+      const [u, kn, an, pw] = names.map((n) => this.ix[n]), L = this.locks[k], c = this.pawC[k], p = G(pw);
       if (!L.on && c > 0.5) { L.on = true; L.p = p.slice(); }
       else if (L.on && c < 0.35) { L.on = false; L.off = sub(L.p, p); }
       if (L.on) { const dx = p[0] - L.p[0], dz = p[2] - L.p[2], d = Math.hypot(dx, dz); if (d > maxLag) { const f = 1 - maxLag / d; L.p[0] += dx * f; L.p[2] += dz * f; } L.p[1] = p[1]; }
@@ -374,7 +386,7 @@ export class NeuralAnimal {
     if (sp.tusks) this.tusks = [0, 1].map(() => mesh(this.capsule, mat(sp.tusks, 0.4)));
   }
   render(A, B, f, dt) {
-    if (this.model) { const W = this.Wi; for (let i = 0; i < W.length; i++) W[i] = lerp(A[i], B[i], f); if (!globalThis.SOMA_ANIMAL_REST) this.model.apply(W, this.ix, this.netRest); return; }
+    if (this.model) { const W = this.Wi; for (let i = 0; i < W.length; i++) W[i] = lerp(A[i], B[i], f); if (!globalThis.SOMA_ANIMAL_REST) this.model.apply(W, this.ix, this.netRest, this.pawC); return; }
     const T = this.THREE, V = (x, y, z) => new T.Vector3(x, y, z), sp = this.sp;
     const J = (n) => { const i = this.ix[n] * 3; return V(lerp(A[i], B[i], f), lerp(A[i + 1], B[i + 1], f), lerp(A[i + 2], B[i + 2], f)); };
     const limb = (o, a, b, r, flat = 1) => { const d = b.clone().sub(a), len = Math.max(1e-4, d.length()); o.position.copy(a).add(b).multiplyScalar(0.5); o.quaternion.setFromUnitVectors(V(0, 1, 0), d.multiplyScalar(1 / len)); o.scale.set(r, (len + 1.4 * r) / 3, r * flat); };
