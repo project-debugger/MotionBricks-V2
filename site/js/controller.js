@@ -182,7 +182,7 @@ class FingerAnimator {
       const palm = M.vnorm(M.vsub(tip, M.vscale(baseDir, M.vdot(tip, baseDir))));
       FINGERS.forEach((name, f) => {
         const chain = [1, 2, 3, 4].map((k) => ix(`${side}Hand${name}${k}`)).filter((c) => c >= 0);
-        const weights = (name === 'Thumb' ? [0.35, 0.55, 0.5] : [0.15, 1.0, 1.0, 0.75]).slice(0, chain.length);
+        const weights = (name === 'Thumb' ? [0.55, 0.6, 0.45] : [0.35, 1.0, 1.0, 0.75]).slice(0, chain.length); // knuckles flex too
         chain.forEach((c, k) => {
           const kid = sk.parents.indexOf(c);
           if (kid < 0) return;
@@ -218,9 +218,33 @@ class FingerAnimator {
     for (const fj of this.joints) {
       const i = fj.hand * 5 + fj.f, ph = this.phase[i], fr = this.freq[i];
       const noise = s.variation * (0.6 * Math.sin(6.2832 * fr[0] * this.t + ph[0]) + 0.4 * Math.sin(6.2832 * fr[1] * this.t + ph[1]));
-      const curl = (target + this.x[i] + noise) * (fj.f === 0 ? 0.7 : 1);
+      const curl = (target + this.x[i] + noise) * [0.75, 0.85, 1, 1.08, 1.16][fj.f]; // thumb, index .. pinky: the outer fingers close more
       M.setQ(out, fj.c, M.qnorm(M.qmul(M.Q(local, fj.c), M.qAxisAngle(fj.axis, curl * Math.PI / 180 * fj.w))));
     }
+    return out;
+  }
+}
+
+// Torso calming: keeps the slow part of the chest's turn relative to the hips (turning, looking) and damps the
+// per-stride side-to-side twist, spread over the three spine joints; plus a light temporal filter on the spine.
+class TorsoCalm {
+  constructor(sk) {
+    const ix = (n) => sk.names.indexOf(n);
+    this.sk = sk; this.spine = ['Spine1', 'Spine2', 'Chest'].map(ix); this.legs = [ix('LeftLeg'), ix('RightLeg')]; this.arms = [ix('LeftArm'), ix('RightArm')];
+    this.slow = null; this.prev = null;
+  }
+  apply(local, amount, dt) {
+    const w = M.fk(local, this.sk.parents), yaw = ([a, b]) => { const d = M.vsub(M.P(w, a), M.P(w, b)); return Math.atan2(-d[2], d[0]); }; // yaw of a left-right line
+    const rel = M.wrap(yaw(this.arms) - yaw(this.legs));
+    this.slow = this.slow === null ? rel : this.slow + M.wrap(rel - this.slow) * (1 - Math.exp(-dt / 0.6));
+    const corr = -amount * M.wrap(rel - this.slow) / this.spine.length, out = new Float64Array(local);
+    for (const j of this.spine) {
+      const axis = M.qrotInv(M.Q(w, this.sk.parents[j]), [0, 1, 0]);
+      let q = M.qnorm(M.qmul(M.qAxisAngle(axis, corr), M.Q(local, j)));
+      if (this.prev && dt > 0) q = M.qSlerp(M.Q(this.prev, j), q, 1 - Math.exp(-dt / 0.03));
+      M.setQ(out, j, q);
+    }
+    this.prev = out;
     return out;
   }
 }
@@ -284,8 +308,9 @@ export class Controller {
     this.stats = { generations: 0, late: 0, lastLatency: 0, lastTokens: 0, failures: 0, error: '', extended: 0, steering: 0, discarded: 0, instant: 0 };
     this.inert = new Inertializer(sk.names.length, 0.07);
     this.feet = new FootLocker(sk, () => ({ on: 0.55, off: 0.35, maxDrift: 0.025, plantSpeed: 0.9, blendIn: 0.05, blendOut: 0.09 }));
-    this.fingers = new FingerAnimator(sk, this.buffer[0], () => ({ curlIdle: 6, curlWalk: 12, curlRun: this.S().fingerCurlRun,
+    this.fingers = new FingerAnimator(sk, this.buffer[0], () => ({ curlIdle: 12, curlWalk: 20, curlRun: this.S().fingerCurlRun,
       follow: this.S().fingerFollow, variation: 3 }));
+    this.torso = new TorsoCalm(sk);
     this.look = new LookAt(sk);
     this.cycleJoints = LEG_ARM.map((n) => sk.names.indexOf(n)).filter((j) => j > 0);
     this.iR = sk.names.indexOf('RightLeg'); this.iL = sk.names.indexOf('LeftLeg');
@@ -636,6 +661,7 @@ export class Controller {
     if (s.anatomical) pose = applyLimits(this.limits, pose);
     if (stages) stages.limits = pose;
     if (s.fingers) pose = this.fingers.apply(pose, Math.hypot(this.simVel[0], this.simVel[2]), dt);
+    if ((s.torsoCalm ?? 0) > 0) pose = this.torso.apply(pose, s.torsoCalm, dt);
     if (s.lookAt ?? true) pose = this.look.apply(pose, goal, dt, 45);
     if (stages) { stages.final = pose; this.lastStages = stages; }
     if (s.smoothing > 0 && this.display) {

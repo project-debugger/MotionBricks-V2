@@ -16,8 +16,10 @@ const DOG_HIP = 0.469, DOG_HIND = 0.448; // network rest: Hips height, hind leg 
 //   pelvis  network Hips; spine: pelvis->chest bones; neck: neck bones (first one = network Neck); head + nose tip
 //   front.L/R: [scapula|null, upper arm, forearm, metacarpus|null] + tip (toe tip, one name or several averaged)
 //   hind.L/R:  [thigh, shin, metatarsus|null] + tip; tail: base to tip
-// carriage: 'model' keeps the species' own neck/head carriage (moved by the network's neck motion), default is the dog's
-// style: speed (gait speed factor), cadence (step-rate factor on top of size), maxGait 'run' (no gallop), bound (paired legs: hopping)
+// carriage: 'model' keeps the species' own neck/head carriage (moved by the network's neck motion, at most carriageLimit degrees),
+//   default is the dog's; headLift (degrees) raises the dog's neck and head for species that carry the head higher
+// style: speed (gait speed factor), cadence (step-rate factor on top of size), maxGait 'run' (no gallop), bound (paired legs: hopping),
+//   legReach (network legs longer than the model's: straighter legs), metaStiff (0-1: lower leg pulled toward the body's down axis)
 export const ANIMAL_MODELS = {
   dog: {
     name: 'Dog', file: 'dog.glb', hips: 0.40,
@@ -72,7 +74,7 @@ export const ANIMAL_MODELS = {
     },
   },
   horse: {
-    name: 'Horse', file: 'horse.glb', hips: 1.45, style: { speed: 1.15 },
+    name: 'Horse', file: 'horse.glb', hips: 1.45, headLift: 25, style: { speed: 1.15, legReach: 1.08, metaStiff: 0.6 },
     credit: { title: 'Horse', author: 'alainsorazu', license: 'CC BY-SA 4.0', url: 'https://sketchfab.com/3d-models/bef74ed402cc40e996eea028668d3c1c' },
     rig: {
       root: 'spine.001_69', pelvis: 'spine.001_69', spine: ['spine.002_68', 'spine.003_54', 'spine.004_52', 'spine.005_51', 'spine.006_35'],
@@ -84,7 +86,7 @@ export const ANIMAL_MODELS = {
     },
   },
   bear: {
-    name: 'Brown bear', file: 'bear.glb', hips: 0.95, style: { speed: 0.85, cadence: 0.92 },
+    name: 'Brown bear', file: 'bear.glb', hips: 0.95, style: { speed: 0.85, cadence: 0.92, legReach: 1.05 },
     credit: { title: 'Bear', author: 'Nyilonelycompany', license: 'CC BY 4.0', url: 'https://sketchfab.com/3d-models/ce0d5eb86cf5459bb6bd20244cb44b27' },
     rig: {
       root: 'spine.004_02', pelvis: 'spine.004_02', spine: ['spine.005_04', 'spine.006_05', 'spine.007_06', 'spine.008_07'],
@@ -96,7 +98,7 @@ export const ANIMAL_MODELS = {
     },
   },
   elephant: {
-    name: 'Elephant', file: 'elephant.glb', hips: 2.3, style: { maxGait: 'run', speed: 0.8, cadence: 0.9 },
+    name: 'Elephant', file: 'elephant.glb', hips: 2.3, style: { maxGait: 'run', speed: 0.8, cadence: 0.9, legReach: 1.1 },
     credit: { title: 'walking elephant', author: 'syaharanichan', license: 'CC BY 4.0', url: 'https://sketchfab.com/3d-models/2705e7483341479e8015d996cd766611' },
     rig: {
       root: 'Bone_Armature.001', pelvis: 'Bone.023_Armature.001', spine: ['Bone.020_Armature.001', 'Bone.019_Armature.001', 'Bone.018_Armature.001'],
@@ -235,14 +237,17 @@ export class AnimalModel {
     R.set(this.root, Rp); R.set(this.pelvis, Rp);
     this.spine.forEach((o, i) => { const u = this.spineU[i]; R.set(o, Rp.clone().slerp(Rc, u * u * (3 - 2 * u))); });
     if (this.cfg.carriage !== 'model' || !rest) { // neck and head along the network's (dog's) carriage
-      const Rn = rot(this.restP.get(this.head).clone().sub(this.restP.get(this.neck[0])), this.frontL0, head.clone().sub(neck), frontL);
+      const lift = (this.cfg.headLift || 0) * Math.PI / 180, up = (v, k) => (lift ? v.applyAxisAngle(frontL, -lift * k) : v); // species that carry the head higher than a dog
+      const Rn = rot(this.restP.get(this.head).clone().sub(this.restP.get(this.neck[0])), this.frontL0, up(head.clone().sub(neck), 1), frontL);
       this.neck.forEach((o) => R.set(o, Rn));
-      R.set(this.head, rot(this.nose0.clone().sub(this.restP.get(this.head)), this.frontL0, headEnd.clone().sub(head), frontL));
+      R.set(this.head, rot(this.nose0.clone().sub(this.restP.get(this.head)), this.frontL0, up(headEnd.clone().sub(head), 0.6), frontL));
     } else { // the species' own carriage, moved by how the network's neck and head turn relative to its chest
       const fr = (a, l) => { const x = a.clone().normalize(), z = l.clone().addScaledVector(x, -l.dot(x)).normalize(); return new T.Matrix4().makeBasis(x, z.clone().cross(x), z); };
       const Cn = fr(neck.clone().sub(sp1), frontL), CnT = Cn.clone().transpose(), qCn = new T.Quaternion().setFromRotationMatrix(Cn);
       const local = (d) => d.normalize().applyMatrix4(CnT);
       const dN = new T.Quaternion().setFromUnitVectors(rest.neckLocal, local(head.clone().sub(neck))), dH = new T.Quaternion().setFromUnitVectors(rest.headLocal, local(headEnd.clone().sub(head)));
+      const lim = (this.cfg.carriageLimit || 180) * Math.PI / 180, clampQ = (q) => { const a = 2 * Math.acos(Math.min(1, Math.abs(q.w))); return a > lim ? new T.Quaternion().slerp(q, lim / a) : q; };
+      dN.copy(clampQ(dN)); dH.copy(clampQ(dH));
       const toW = (d) => qCn.clone().multiply(d).multiply(this.qCm0inv);
       const Rn = toW(dN); this.neck.forEach((o) => R.set(o, Rn)); R.set(this.head, toW(dH));
     }
@@ -276,7 +281,10 @@ export class AnimalModel {
     for (const [kind, s, S] of limbs) {
       const l = this[kind][s], b = kind === 'front' ? l.bones.slice(1) : l.bones, [u, m, e] = b;
       const tipT = V(kind === 'front' ? `${S}HandEnd` : `${S}FootEnd`), wristN = V(kind === 'front' ? `${S}Hand` : `${S}Foot`);
-      const target = e ? tipT.clone().addScaledVector(tipT.clone().sub(wristN).normalize(), -l.metaLen) : tipT;
+      // lower-leg direction: the network's, pulled toward the model's own standing direction for stiff-legged species
+      const metaDir = tipT.clone().sub(wristN).normalize(), stiff = this.cfg.style?.metaStiff || 0;
+      if (e && stiff > 0) { const down = new T.Vector3(0, -1, 0).applyQuaternion(kind === 'front' ? Rc : Rp); metaDir.lerp(down, stiff).normalize(); } // standing cannon: along the body's down axis
+      const target = e ? tipT.clone().addScaledVector(metaDir, -l.metaLen) : tipT;
       const A = u.getWorldPosition(new T.Vector3()), Kn = m.getWorldPosition(new T.Vector3());
       const C = e ? e.getWorldPosition(new T.Vector3()) : this.tipNow(l, m);
       this.twoBone(u, m, A, Kn, C, target);

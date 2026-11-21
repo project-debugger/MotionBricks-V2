@@ -97,6 +97,16 @@ displayed per-joint maxima within ~1.5x of the mocap's. Arm swing after a 90 deg
 travel 0.48 / 0.59 m and elbow range 48-54 deg (before: 0.28 / 0.21 m, 19-20 deg; mocap running:
 0.46-0.52 m, 52 deg). Walking reaches its 1.4 m/s target (before 0.84 m/s) with even arm swing.
 
+## Upper body and hands
+
+- **Calm torso** (`TorsoCalm` in `js/controller.js`, slider "Calm torso twist when running", default 0.4):
+  the chest's turn relative to the hips is split into a slow part (turning, looking around), which is kept,
+  and the per-stride side-to-side twist, which is reduced and spread over the three spine joints; a 30 ms
+  filter smooths the spine. Measured while jogging (same run, before vs after the pass): twist standard
+  deviation 11.4 deg -> 7.1 deg (real jogging capture: 10-22 deg; 0.7 gives 5.6 deg).
+- **Jogging hands**: fingers close to a loose fist with speed (running curl 55 deg by default), graded
+  from index to pinky, knuckles and thumb included, with follow-through from the arm swing.
+
 ## Body layer
 
 Procedural, in the vertex shader (the model and the mocap contain no muscle or breathing data):
@@ -163,6 +173,9 @@ scratch, driving realistic skinned 3D models:
   by size (larger animals step more slowly). Per-species styles sit on top (`style` in `js/animalmesh.js`):
   rabbits bound with each pair of legs together, elephants never gallop and move slower, bears are slower,
   cats and foxes step quicker, horses run faster. Planted paws keep their toes at the standing angle.
+  Bigger animals get straighter legs (`legReach`: the network's legs are 5-10% longer than the model's,
+  so the model's legs extend more), the horse keeps its cannon bones near vertical (`metaStiff`) and
+  carries its head 25 deg higher than a dog (`headLift`).
 - **Bigger is not better here**: a 6-expert, 320-unit network trained for 150 epochs reached a lower
   validation loss (0.221 vs 0.242) but drove worse in closed loop (stops 4x slower, more paw sliding,
   jerkier trot, twice the cost), so it was not shipped. A run with noise on the input pose

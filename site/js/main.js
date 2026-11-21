@@ -22,6 +22,7 @@ const IS_TOUCH = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in wi
 let S = { ...DEFAULTS };
 try { Object.assign(S, JSON.parse(localStorage.getItem('soma-settings') || '{}')); } catch { /* private mode */ }
 const save = () => { try { localStorage.setItem('soma-settings', JSON.stringify(S)); } catch { /* ignore */ } };
+if ((S.settingsVersion || 1) < 2) Object.assign(S, { fingerCurlRun: DEFAULTS.fingerCurlRun, torsoCalm: DEFAULTS.torsoCalm, settingsVersion: 2 }); // new defaults reach saved settings
 
 // ------------------------------------------------------------------ data
 async function getJSON(p) { const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.json(); }
@@ -184,7 +185,7 @@ const SLIDERS = [
   ['responsiveness', 'Responsiveness (lower = snappier)', 0.04, 0.4, 0.01, 's'],
   ['predictionHorizon', 'Planning horizon', 0.5, 1.4, 0.05, 's'], ['playbackRate', 'Animation speed', 0.5, 1.5, 0.05, 'x'],
   ['smoothing', 'Extra smoothing', 0, 0.6, 0.05, ''], ['variation', 'Motion variety', 0, 0.5, 0.05, ''],
-  ['fingerCurlRun', 'Finger curl when running', 0, 50, 1, 'deg'], ['fingerFollow', 'Finger follow-through', 0, 20, 1, ''],
+  ['fingerCurlRun', 'Finger curl when running', 0, 80, 1, 'deg'], ['fingerFollow', 'Finger follow-through', 0, 20, 1, ''], ['torsoCalm', 'Calm torso twist when running', 0, 1, 0.05, ''],
   ['steering', 'Body-rotation assist (0 = off)', 0, 360, 10, 'deg/s'],
 ];
 const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomical joint limits'], ['fingers', 'Procedural fingers'], ['velocityMatching', 'Velocity-matched joins'], ['lookAt', 'Head leads turns'],
@@ -402,6 +403,6 @@ async function main() {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, get animal() { return animal; } };
+  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, clips, sk, M, get animal() { return animal; } };
 }
 main().catch((e) => { $('#status').textContent = `Error: ${e.message}`; console.error(e); });

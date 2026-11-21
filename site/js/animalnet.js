@@ -93,7 +93,7 @@ export class NeuralAnimal {
       return 1;
     });
     if (model) { // a skinned model: bone lengths measured on it, so the network's paws land under the model's
-      const L = model.legLengths(), kF = L.front / (0.402 * this.scale), kH = L.hind / (0.448 * this.scale);
+      const L = model.legLengths(), reach = model.cfg.style?.legReach || 1, kF = reach * L.front / (0.402 * this.scale), kH = reach * L.hind / (0.448 * this.scale);
       this.boneK = this.names.map((n) => (/Arm|Hand/.test(n) ? kF : /Leg|Foot/.test(n) && !/UpLeg/.test(n) ? kH : 1));
       // longer (shorter) front legs than the dog's: pitch the body up (down) so all four paws stand on the ground
       const lp0 = this.localPose(m.start_pose), avg = (a, b, k) => (lp0[this.ix[a] * 3 + k] + lp0[this.ix[b] * 3 + k]) / 2;
