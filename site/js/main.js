@@ -295,7 +295,7 @@ async function main() {
       const w = waiting.get(m.id); waiting.delete(m.id);
       const frames = [], contacts = [];
       for (let i = 0; i < m.count; i++) { frames.push(m.frames.slice(i * J * 7, (i + 1) * J * 7)); contacts.push(Array.from(m.contacts.slice(i * 4, i * 4 + 4))); }
-      $('#hud-net').textContent = `${m.ms.network.toFixed(0)} ms`;
+      $('#hud-net').textContent = `${m.ms.network.toFixed(0)} ms`; PERF.net += m.ms.total; PERF.gens++;
       const done = () => w.resolve({ frames, contacts, tokens: m.tokens });
       if (window.SOMA_EXTRA_MS) setTimeout(done, window.SOMA_EXTRA_MS); else done(); // test hook: emulate a slow phone
     } else if (m.type === 'error') {
@@ -366,15 +366,21 @@ async function main() {
   $('#close').addEventListener('click', () => { $('#panel').hidden = true; });
   if (!IS_TOUCH) document.body.classList.add('desktop');
 
+  // per-frame cost counters (main thread) and generation cost (worker); read by the performance governor and tests
+  const PERF = window.SOMA_PERF = { frames: 0, frameMs: 0, update: 0, post: 0, render: 0, net: 0, gens: 0, animal: 0 };
   // loop
   const camT = new THREE.Vector3(0, 0.95, 0); let last = performance.now(), fpsAcc = 0, fpsN = 0;
   const ray = new THREE.Raycaster(), tmp = new THREE.Vector3();
   function frame(now) {
-    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now; // stays real-time down to 10 fps
+    // test hook: with SOMA_MANUAL set, the game only advances through SOMA_DEBUG.step(dt) (frame-exact captures)
+    if (window.SOMA_MANUAL && !frame.stepping) { last = now; requestAnimationFrame(frame); return; }
+    const dt = frame.stepping ? frame.stepping : Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now; // stays real-time down to 10 fps
     let pose;
     if (animal) {
       if (window.SOMA_HIDE_LANDMARKS) for (const b of R.landmarks) b.visible = false; // debug captures
+      const ta = performance.now();
       if (!window.SOMA_FREEZE) animal.update(command(dt), dt);
+      PERF.animal += performance.now() - ta;
       const t = animal.target, k = 1 - Math.exp(-dt * 6), sc = Math.min(3.6, Math.max(0.28, animal.size / 0.85));
       camT.x += (t.x - camT.x) * k; camT.z += (t.z - camT.z) * k;
       const d = input.camDist * sc;
@@ -382,16 +388,19 @@ async function main() {
       R.camera.lookAt(camT.x, t.y * 0.85, camT.z);
       R.sun.position.set(t.x + 3.5 * sc, 7.5 * sc, t.z + 2.5 * sc); R.sun.target.position.set(t.x, 0, t.z);
       R.sun.shadow.camera.left = R.sun.shadow.camera.bottom = -4 * sc; R.sun.shadow.camera.right = R.sun.shadow.camera.top = 4 * sc; R.sun.shadow.camera.updateProjectionMatrix();
-      R.renderer.render(R.scene, R.camera);
+      const tr = performance.now(); R.renderer.render(R.scene, R.camera); PERF.render += performance.now() - tr; PERF.frames++; PERF.frameMs += dt * 1000;
       fpsAcc += dt; fpsN++;
       if (fpsAcc > 0.5) { $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps`; $('#hud-speed').textContent = `${animal.speed.toFixed(1)} m/s`; fpsAcc = 0; fpsN = 0; }
       window.SOMA_STATE = { ready, animal: animal.key, speed: animal.speed, pos: [animal.pos.x, animal.pos.z], action: animal.action ? animal.action.name : null, mode: animal.mode };
-      requestAnimationFrame(frame); return;
+      if (!frame.stepping) requestAnimationFrame(frame);
+      return;
     }
     if (R.sun.shadow.camera.left !== -4) { R.sun.shadow.camera.left = R.sun.shadow.camera.bottom = -4; R.sun.shadow.camera.right = R.sun.shadow.camera.top = 4; R.sun.shadow.camera.updateProjectionMatrix(); }
+    const tu = performance.now();
     if (ready && !window.SOMA_FREEZE) pose = ctrl.update(command(dt), dt);
     else if (ready) pose = ctrl.display;
     else pose = ctrl.display || ctrl.buffer[3];
+    const tp = performance.now(); PERF.update += tp - tu;
     if (S.bodyFX !== false) pose = bodyFX.posePass(pose, dt);
     const world = M.fk(pose, sk.parents);
     if (S.bodyFX !== false) bodyFX.update(pose, world, ready ? ctrl.sampleContacts(ctrl.time) : null, Math.hypot(ctrl.simVel[0], ctrl.simVel[2]), S.sprintSpeed, dt);
@@ -414,7 +423,9 @@ async function main() {
     for (const ev of ctrl.events.splice(0)) if (ev.type === 'sit') {
       R.chair.userData.build(ev.seat); R.chair.position.set(ev.pos[0] - Math.sin(ev.yaw) * 0.08, 0, ev.pos[2] - Math.cos(ev.yaw) * 0.08); R.chair.rotation.y = ev.yaw; R.chair.visible = true;
     }
+    const tr = performance.now(); PERF.post += tr - tp;
     R.renderer.render(R.scene, R.camera);
+    PERF.render += performance.now() - tr; PERF.frames++; PERF.frameMs += dt * 1000;
     fpsAcc += dt; fpsN++;
     if (fpsAcc > 0.5) {
       $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps`;
@@ -425,9 +436,11 @@ async function main() {
       fpsAcc = 0; fpsN = 0;
     }
     window.SOMA_STATE = { ready, generations: ctrl.stats.generations, late: ctrl.stats.late, latency: ctrl.latency, speed: Math.hypot(ctrl.simVel[0], ctrl.simVel[2]), hips: [hx, world[1], hz], failures: ctrl.stats.failures, error: ctrl.stats.error };
-    requestAnimationFrame(frame);
+    window.SOMA_LAST = { pose, world }; // test hook: last displayed pose
+    if (!frame.stepping) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, clips, sk, M, loadWalkStyle, get animal() { return animal; } };
+  const step = (dt = 1 / 30) => { frame.stepping = dt; try { frame(performance.now()); } finally { frame.stepping = 0; } };
+  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, clips, sk, M, loadWalkStyle, step, R, get animal() { return animal; } };
 }
 main().catch((e) => { $('#status').textContent = `Error: ${e.message}`; console.error(e); });

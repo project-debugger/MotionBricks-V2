@@ -7,7 +7,7 @@
 import * as M from '../../js/math3d.js';
 import { bindLimits, JOINT_NAMES } from '../../js/codec.js';
 import { DEFAULTS } from '../../js/settings.js';
-import { Controller, Library } from '../../js/controller.js';
+import { Controller, Library, maxBodyStep, POP_DEG } from '../../js/controller.js';
 import { ClipLibrary, legState } from '../../js/library.js';
 import { registerFightActions, FIGHT_MOVES } from '../../js/fight.js';
 
@@ -95,6 +95,7 @@ try {
     const res = await run({ context: req.context, target: req.target, allowed: req.allowed });
     return res;
   }
+  const CHAIN = 5, CHAIN_T = 6, CHAIN_KEEP = 12;
   const entries = [], blobs = []; let off = 0, t0 = performance.now();
   const jm = JOINT_NAMES.map((n) => sk.names.indexOf(n));
   for (const [kind, cand, o] of todo) {
@@ -106,9 +107,28 @@ try {
       const r2 = await segment(h2, { gait: o.then.gait, move: [0, 0] }, goalOf(o.then), null, 12);
       frames = [...r1.frames, ...r2.frames.slice(1)]; contacts = [...r1.contacts, ...r2.contacts.slice(1)];
     } else {
+      // a chain of short segments, as in live play: one long segment (16 tokens) let the network plan a start or
+      // turn as a sprinter's lunge (torso pitched 40-90 deg); 6-token steps reach the same speed upright
+      // A result whose body flips between two frames (the network sometimes teleports a 180 deg reversal) is
+      // regenerated turning through one side first, or with a longer first step; the smoothest attempt is kept.
       const g = o.dir === null ? (kind === 'idle' && o.gait === 'crouch' ? 'crouch' : o.gait) : o.gait;
-      const r = await segment(hist, { gait: g, move: [0, 0] }, goalOf(o), null, 16);
-      frames = r.frames; contacts = r.contacts;
+      const tries = [{}, ...(o.dir === 180 ? [{ via: 90 }, { via: -90 }] : o.dir !== null && Math.abs(o.dir) >= 135 ? [{ via: 90 * Math.sign(o.dir) }] : []), { firstT: 8 }, { firstT: 10 }];
+      let best = null;
+      for (const tr of tries) {
+        let buf = hist, fr = [], ct = [];
+        for (let n = 0; n < CHAIN; n++) {
+          const go = tr.via && n === 0 ? goalOf({ gait: o.gait, dir: tr.via }) : goalOf(o); // first step toward the side
+          const r = await segment(buf, { gait: g, move: [0, 0] }, go, null, n === 0 && tr.firstT ? tr.firstT : CHAIN_T);
+          const keep = n < CHAIN - 1 ? CHAIN_KEEP : r.frames.length - 1, kf = r.frames.slice(0, keep + 1), kc = r.contacts.slice(0, keep + 1);
+          fr = fr.length ? [...fr, ...kf.slice(1)] : kf; ct = ct.length ? [...ct, ...kc.slice(1)] : kc;
+          buf = [...buf.slice(0, -1), ...kf];
+        }
+        const step = maxBodyStep(fr, sk.names, 1);
+        if (!best || step < best.step) best = { step, fr, ct, tr };
+        if (step <= POP_DEG) break;
+      }
+      if (best.step > POP_DEG || Object.keys(best.tr).length) log(`${kind}->${o.gait}@${o.dir}: ${JSON.stringify(best.tr)} max step ${best.step.toFixed(0)} deg`);
+      frames = best.fr; contacts = best.ct;
     }
     const F = frames.length, root = new Float32Array(F * 3), qi = new Int16Array(F * jm.length * 4), ct = new Uint8Array(F * 4);
     frames.forEach((p, f) => {
@@ -127,7 +147,7 @@ try {
   let bin = ''; for (let i = 0; i < all.length; i += 0x8000) bin += String.fromCharCode.apply(null, all.subarray(i, i + 0x8000));
   window.RESULT = { meta: { fps: 30, joints: JOINT_NAMES, model: modelKey, entries,
     layout: 'per entry: float32 root[F,3], int16 quat[F,Jm,4] (/32767), uint8 contacts[F,4] (/255); other joints: relaxed pose',
-    note: 'Every frame is output of the SOMA network (same pipeline as the live playground); contexts are 4-frame mocap windows',
+    note: 'Every frame is output of the SOMA network (same pipeline as the live playground); contexts are 4-frame mocap windows; locomotion entries are chains of 6-token segments (12 frames kept each), planned within human acceleration',
     license: 'Model output conditioned on NVIDIA MotionBricks sample clips (NVIDIA Sample Data Evaluation License)' },
     b64: btoa(bin), seconds: (performance.now() - t0) / 1000 };
 } catch (e) { window.RESULT = { error: String(e && e.stack || e) }; }

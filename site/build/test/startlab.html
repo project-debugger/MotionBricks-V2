@@ -1,0 +1,77 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SOMA start lab</title>
+<!-- Asks SOMA for idle -> jog transitions under controlled variations and reports the torso lean of each result.
+     Run with build/test/run_lab.cjs. -->
+<script type="module">
+import * as M from '../../js/math3d.js';
+import { bindLimits } from '../../js/codec.js';
+import { DEFAULTS } from '../../js/settings.js';
+import { Controller, Library } from '../../js/controller.js';
+import { ClipLibrary, legState } from '../../js/library.js';
+const BASE = new URL('../../', location.href).href, q = new URLSearchParams(location.search);
+const getJSON = async (p) => (await fetch(BASE + p)).json(), getBin = async (p) => (await fetch(BASE + p)).arrayBuffer();
+try {
+  const [skel, lim, wmeta, wbin, cmeta, cbin, models] = await Promise.all([getJSON('data/skeleton.json'), getJSON('data/joint_limits.json'),
+    getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('models/models.json')]);
+  const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
+  const limits = bindLimits(lim, sk), lib = new Library(sk, wmeta, wbin), clips = new ClipLibrary(sk, cmeta, cbin, limits), J = sk.names.length;
+  const S = { ...DEFAULTS, variation: 0, ...JSON.parse(q.get('settings') || '{}') };
+  const worker = new Worker(new URL('../../js/worker.js', import.meta.url), { type: 'module' });
+  let nextId = 1; const waiting = new Map(); let readyResolve; const ready = new Promise((r) => { readyResolve = r; });
+  worker.onmessage = (e) => { const m = e.data;
+    if (m.type === 'ready') readyResolve(m);
+    else if (m.type === 'result') { const w = waiting.get(m.id); waiting.delete(m.id); const frames = []; for (let i = 0; i < m.count; i++) frames.push(m.frames.slice(i * J * 7, (i + 1) * J * 7)); w.resolve({ frames, tokens: m.tokens }); }
+    else if (m.type === 'error') { const w = waiting.get(m.id); if (w) { waiting.delete(m.id); w.reject(new Error(m.error)); } } };
+  worker.postMessage({ type: 'load', base: BASE + 'models/', model: 'balanced', info: models.models.balanced, skeleton: sk, jointLimits: lim, threads: 4 });
+  await ready;
+  const run = (req, o = {}) => new Promise((resolve, reject) => { const id = nextId++; waiting.set(id, { resolve, reject }); worker.postMessage({ type: 'generate', id, ...req, anatomical: o.anatomical ?? true, velocityMatching: o.vm ?? true, correctEndpoints: o.ce ?? true }); });
+  const L = clips.L, H = sk.names.indexOf('Hips'), N = sk.names.indexOf('Neck1'), LH = sk.names.indexOf('LeftHand'), RH = sk.names.indexOf('RightHand');
+  function history(ci) {
+    const e = clips.cand[ci], a = Math.max(0, e.f - 45), frames = [];
+    for (let n = a; n <= e.f + 3; n++) frames.push(clips.frame(e.ci, n));
+    const st = legState(frames[frames.length - 1], L), inv = M.qYaw(-st.yaw);
+    return frames.map((p) => { const r = M.P(p, 0), d = M.qrot(inv, [r[0] - st.g[0], 0, r[2] - st.g[1]]), out = new Float64Array(p);
+      M.setP(out, 0, [d[0], r[1], d[2]]); M.setQ(out, 0, M.qnorm(M.qmul(inv, M.Q(p, 0)))); return out; });
+  }
+  const pitchOf = (frames) => frames.map((p) => { const w = M.fk(p, sk.parents), v = [w[N * 7] - w[H * 7], w[N * 7 + 1] - w[H * 7 + 1], w[N * 7 + 2] - w[H * 7 + 2]]; return Math.acos(v[1] / Math.hypot(...v)) * 57.3; });
+  const handOf = (frames) => frames.map((p) => { const w = M.fk(p, sk.parents); return (w[LH * 7 + 1] + w[RH * 7 + 1]) / 2 - w[H * 7 + 1]; });
+  const idleC = clips.cand.map((e, i) => [e, i]).filter(([e]) => e.cat === 'idle' && !e.crouch && e.speed < 0.12);
+  const ctxIdx = [idleC[0][1], idleC[Math.floor(idleC.length / 2)][1], idleC[idleC.length - 1][1]];
+  const out = [];
+  for (const variant of JSON.parse(q.get('variants'))) {
+    const res = [];
+    for (const ci of ctxIdx) {
+      const hist = history(ci);
+      const c = new Controller({ sk, lib, clips, limits, settings: () => ({ ...S, ...(variant.settings || {}) }), generate: null, actions: wmeta.actions });
+      c.buffer = hist; c.contacts = hist.map(() => [1, 1, 1, 1]); c.time = (hist.length - 1) / 30; c.sinceChange = 0; c.latency = 0.3;
+      const goal = [0, 0, variant.speed ?? S.runSpeed];
+      if (variant.chain) { // successive short segments, each continuing from the previous result
+        let buf = hist, all = [], tokens = [];
+        for (const T of variant.chain) {
+          const cc = new Controller({ sk, lib, clips, limits, settings: () => ({ ...S, ...(variant.settings || {}) }), generate: null, actions: wmeta.actions });
+          cc.buffer = buf; cc.contacts = buf.map(() => [1, 1, 1, 1]); cc.time = (buf.length - 1) / 30; cc.sinceChange = 0; cc.latency = 0.3;
+          const rq = cc.buildRequest({ gait: variant.gait || 'run', move: [0, 1] }, goal, buf.length - 1, { forceT: T });
+          const rr = await run({ context: rq.context, target: rq.target, allowed: rq.allowed }, variant);
+          const keep = variant.keep ? rr.frames.slice(0, variant.keep + 1) : rr.frames;
+          all = all.length ? [...all, ...keep.slice(1)] : keep; tokens.push(rr.tokens);
+          buf = [...buf.slice(0, -1), ...keep];
+        }
+        const p = pitchOf(all), h = handOf(all);
+        const sp = (a, b) => { const x = M.P(all[b], 0), y = M.P(all[a], 0); return Math.hypot(x[0] - y[0], x[2] - y[2]) * 30 / (b - a); };
+        const prof = [10, 20, 30, 40].filter((f) => f < all.length - 2).map((f) => sp(f - 4, f + 2).toFixed(1)).join('/');
+        res.push({ max: +Math.max(...p).toFixed(0), at: p.indexOf(Math.max(...p)), handMin: +Math.min(...h).toFixed(2), tokens: tokens.join('+'), frames: all.length, dist: +sp(0, all.length - 1).toFixed(2), tgt: `speed@10/20/30/40f ${prof}` });
+        continue;
+      }
+      const req = c.buildRequest({ gait: variant.gait || 'run', move: [0, 1] }, goal, hist.length - 1, { forceT: variant.T ?? 16 });
+      if (variant.scale) { const g = M.P(hist[hist.length - 1], 0); req.target = req.target.map((p) => { const o = new Float64Array(p), r = M.P(p, 0); M.setP(o, 0, [g[0] + (r[0] - g[0]) * variant.scale, r[1], g[2] + (r[2] - g[2]) * variant.scale]); return o; }); }
+      if (variant.free) req.allowed = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+      const r = await run({ context: req.context, target: req.target, allowed: req.allowed }, variant);
+      const p = pitchOf(r.frames), h = handOf(r.frames), tg = M.P(req.target[0], 0), c0 = M.P(hist[hist.length - 1], 0);
+      res.push({ max: +Math.max(...p).toFixed(0), at: p.indexOf(Math.max(...p)), handMin: +Math.min(...h).toFixed(2), tokens: r.tokens, frames: r.frames.length, dist: +Math.hypot(tg[0] - c0[0], tg[2] - c0[2]).toFixed(2), tgt: c.stats.lastTarget?.clip?.split('/').pop() });
+    }
+    out.push({ variant, res });
+  }
+  window.RESULT = out;
+} catch (e) { window.RESULT = { error: String(e && e.stack || e) }; }
+</script>

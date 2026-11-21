@@ -20,12 +20,13 @@ try {
   const SCRIPT = [[0, null, 'run'], [2, [0, 1], 'walk'], [6, [0, 1], 'run'], [10, [1, 0], 'run'], [13, [0, 1], 'sprint'], [17, [-1, 0], 'run'],
     [20, null, 'run'], [22, null, 'run', 'duck'], [26, null, 'run', 'stand_up'], [29, null, 'run', 'jump'], [31, [0, 1], 'run', 'jump'], [33, null, 'run'], [34, null, 'run', 'block'], [36.5, null, 'run'], [38, null, 'end']];
   const dt = 1 / 60, rec = [], P = a.P, paws = meta.paws.map((n) => a.ix[n]);
-  let lastSeg = -1, t = 0, worst = 0, msNet = []; const dump = [];
+  let lastSeg = -1, t = 0, worst = 0, msNet = []; const dump = [], alphas = [];
   while (true) {
     let c = SCRIPT[0]; for (const s of SCRIPT) if (t >= s[0]) c = s;
     if (c[2] === 'end') break;
     const seg = SCRIPT.indexOf(c), cmd = { move: c[1] || [0, 0], gait: c[2], action: c[3] && seg !== lastSeg ? c[3] : null }; lastSeg = seg;
     const clk = a.clock, t0 = performance.now(); a.update(cmd, dt); msNet.push(performance.now() - t0);
+    if (q.has('alpha')) alphas.push(Array.from(net.alpha).sort((x, y) => y - x));
     if (q.has('dump') && a.clock !== clk) dump.push({ t: +t.toFixed(3), v: +Math.hypot(a.rootVel[0], a.rootVel[1]).toFixed(3), p: Array.from(a.pose, (x) => +x.toFixed(4)) });
     const w = a.world;
     for (let i = 0; i < w.length; i++) if (!Number.isFinite(w[i])) worst = Infinity; else worst = Math.max(worst, Math.abs(w[i] - (i % 3 === 0 ? a.pos[0] * a.scale : i % 3 === 2 ? a.pos[1] * a.scale : 0)));
@@ -54,6 +55,7 @@ try {
     chestAboveHips: { getUp: +Math.max(...seg(26, 29).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3), idle: +Math.max(...seg(0.5, 2).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3), rear: +Math.max(...seg(34, 36).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3) },
     contactPawSlideMs: +(slideSum / Math.max(1, slideN)).toFixed(3), movingPawSlideMs: +(stancePawSlide / Math.max(1, stanceN)).toFixed(3), pawAccP99: +pawAcc[Math.floor(pawAcc.length * 0.99)].toFixed(1), pawAccMax: +pawAcc[pawAcc.length - 1].toFixed(1), verticalAccelMax: +jerkMax.toFixed(1), stepMsP50: +ms[ms.length >> 1].toFixed(2), stepMsP99: +ms[Math.floor(ms.length * 0.99)].toFixed(2),
     dump: q.has('dump') ? dump : undefined,
+    alpha: q.has('alpha') ? { top1: [0.5, 0.9, 0.99].map((f) => +alphas.map((x) => x[0]).sort((x, y) => x - y)[Math.floor(alphas.length * f)].toFixed(3)), skipped: [0.005, 0.01, 0.02].map((e) => +(alphas.reduce((n, x) => n + x.filter((v) => v < e).length, 0) / alphas.length / alphas[0].length).toFixed(3)), smallest: +Math.min(...alphas.map((x) => x[x.length - 1])).toExponential(2) } : undefined,
     trace: q.has('trace') ? rec.filter((_, i) => i % 6 === 0).map((r) => ({ t: +r.t.toFixed(2), w: r.w.map((v) => +v.toFixed(3)) })) : undefined };
 } catch (e) { window.RESULT = { error: String(e && e.stack || e) }; }
 </script>

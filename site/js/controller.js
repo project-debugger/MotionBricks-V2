@@ -6,6 +6,20 @@ import { legIndices, legState, footSep, upCrossings } from './library.js';
 import { rawFeatures } from './bank.js';
 
 const FPS = 30, DT = 1 / 30, LN2 = Math.log(2);
+// How fast a real body speeds up and brakes along its direction of travel ([speed up, brake] in m/s^2), measured
+// on the mocap here (100STYLE and NVIDIA clips, 0.2 s smoothing): walking reaches 2.6-3.1, jogging and running
+// 3.3-6, braking up to 6.7. The motion is planned within these limits so the network never gets targets that
+// only a sprinter's lunge could reach (the gameplay presets accelerate at up to 16 m/s^2). Turning keeps the preset.
+export const HUMAN_ACCEL = { walk: [2.5, 3.5], run: [4.5, 6], sprint: [6, 7], crouch: [2.5, 3.5] };
+function capHuman(dv, v, dt, acc, dec, lat) {
+  const sp = Math.hypot(v[0], v[2]);
+  if (sp < 0.3) { const l = Math.hypot(dv[0], dv[2]), c = acc * dt; return l > c ? [dv[0] * c / l, 0, dv[2] * c / l] : dv; }
+  const u = [v[0] / sp, v[2] / sp];
+  let t = dv[0] * u[0] + dv[2] * u[1];
+  const n = [dv[0] - t * u[0], dv[2] - t * u[1]], nl = Math.hypot(n[0], n[1]), ns = nl > lat * dt ? lat * dt / nl : 1;
+  t = Math.max(-dec * dt, Math.min(acc * dt, t));
+  return [t * u[0] + n[0] * ns, 0, t * u[1] + n[1] * ns];
+}
 
 function springVelocity(v, a, goal, halflife, dt) {
   const y = (4 * LN2 / Math.max(halflife, 1e-5)) / 2, e = Math.exp(-y * dt), vo = [], ao = [];
@@ -305,6 +319,21 @@ class LookAt {
 // usually free the moment the input changes. Direction changes are answered at once by rotating the
 // buffered future (steering warp); the warp is replayed onto in-flight results so they stay continuous.
 const yawRot = (v, a) => M.qrot(M.qYaw(a), v);
+// Largest frame-to-frame rotation (deg) of the body's own joints (no fingers, toes or face) in a generated
+// sequence. Real motion stays under ~40 deg/frame even in a sprint pivot; the network sometimes "teleports" a
+// 180 deg reversal through one or two frames (70-170 deg jumps), which reads as the body flipping.
+export const BODY_JOINTS = ['Hips', 'Spine1', 'Spine2', 'Chest', 'Neck1', 'Neck2', 'Head', 'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand',
+  'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand', 'LeftLeg', 'LeftShin', 'LeftFoot', 'RightLeg', 'RightShin', 'RightFoot'];
+export const POP_DEG = 60;
+export function maxBodyStep(frames, names, from = 1) {
+  const js = BODY_JOINTS.map((n) => names.indexOf(n)).filter((j) => j >= 0);
+  let worst = 0;
+  for (let i = Math.max(1, from); i < frames.length; i++) for (const j of js) {
+    const d = M.vlen(M.qToScaledAxis(M.qmul(M.Q(frames[i], j), M.qconj(M.Q(frames[i - 1], j))))) * 57.29578;
+    if (d > worst) worst = d;
+  }
+  return worst;
+}
 function rotateFrame(f, pivot, ang) {
   const out = new Float64Array(f), p = M.P(f, 0), d = yawRot([p[0] - pivot[0], 0, p[2] - pivot[2]], ang);
   M.setP(out, 0, [pivot[0] + d[0], p[1], pivot[2] + d[2]]);
@@ -328,7 +357,8 @@ export class Controller {
     this.queue = []; this.commitEnd = -1; this.latency = 0.3; this.latHist = []; this.epoch = 0;
     this.base = 0; // frames dropped from the front of the buffer so far (absolute index = base + local index)
     this.warps = []; this.warpSeq = 0; this.planYaw = null; this.warpSincePlan = 0; this.sinceChange = 1e6;
-    this.stats = { generations: 0, late: 0, lastLatency: 0, lastTokens: 0, failures: 0, error: '', extended: 0, steering: 0, discarded: 0, instant: 0 };
+    this.stats = { generations: 0, late: 0, lastLatency: 0, lastTokens: 0, failures: 0, error: '', extended: 0, steering: 0, discarded: 0, instant: 0, popRejected: 0 };
+    this.popRetry = 0; // consecutive generations rejected for a body flip
     this.inert = new Inertializer(sk.names.length, 0.07);
     this.feet = new FootLocker(sk, () => ({ on: 0.55, off: 0.35, maxDrift: 0.025, plantSpeed: 0.9, blendIn: 0.05, blendOut: 0.09 }));
     this.fingers = new FingerAnimator(sk, this.buffer[0], () => ({ curlIdle: 12, curlWalk: 20, curlRun: this.S().fingerCurlRun,
@@ -357,13 +387,16 @@ export class Controller {
     return [cmd.move[0] / n * speed * mag, 0, cmd.move[1] / n * speed * mag];
   }
   // spring-damper velocity with acceleration caps (gameplay feel); integrates position
-  step(state, goal, dt) {
+  // gait: when given, the step plans the character's motion and stays within human acceleration (HUMAN_ACCEL)
+  step(state, goal, dt, gait = null) {
     const s = this.S(), hl = s.responsiveness * s.inertia;
     if (M.vdot(goal, state.v) < 0) goal = M.vadd(goal, M.vscale(state.v, s.momentum));
     let [vn, an] = springVelocity(state.v, state.a, goal, hl, dt);
     let dv = M.vsub(vn, state.v);
     const cap = Math.max(0, (M.vlen(vn) > M.vlen(state.v) ? s.acceleration : s.deceleration) * dt), dl = M.vlen(dv);
     if (dl > cap && dl > 1e-9) { dv = M.vscale(dv, cap / dl); an = M.vscale(dv, 1 / Math.max(dt, 1e-6)); }
+    const lim = gait && s.humanAccel !== false ? HUMAN_ACCEL[gait] : null;
+    if (lim) { dv = capHuman(dv, state.v, dt, Math.min(s.acceleration, lim[0]), Math.min(s.deceleration, lim[1]), s.acceleration); an = M.vscale(dv, 1 / Math.max(dt, 1e-6)); }
     state.v = M.vadd(state.v, dv); state.a = an; state.p = M.vadd(state.p, M.vscale(state.v, dt));
   }
   simulate(goal, dt) { // smoothed command velocity (HUD, fingers, replan trigger)
@@ -377,9 +410,17 @@ export class Controller {
     const w = M.fk(b[k], this.sk.parents);
     return { p: [p[0], 0, p[2]], v: [(p[0] - q[0]) * FPS / n, 0, (p[2] - q[2]) * FPS / n], yaw: headingFromHips(M.P(w, this.iR), M.P(w, this.iL)) };
   }
-  predictFrom(k, goal, horizon) {
+  // a goal more than 100 deg from the current heading, rotated to 90 deg on its own side (people reverse by turning)
+  throughSide(goal, k) {
+    const sp = Math.hypot(goal[0], goal[2]); if (sp < 0.5) return goal;
+    const yaw = this.rootState(k).yaw, d = M.wrap(Math.atan2(goal[0], goal[2]) - yaw);
+    if (Math.abs(d) < 1.75) return goal;
+    const y = yaw + (d >= 0 ? 1 : -1) * Math.PI / 2;
+    return [Math.sin(y) * sp, 0, Math.cos(y) * sp];
+  }
+  predictFrom(k, goal, horizon, gait = null) {
     const r = this.rootState(k), st = { p: r.p, v: r.v, a: [0, 0, 0] };
-    for (let i = 0; i < Math.max(1, Math.round(horizon * FPS)); i++) this.step(st, goal, DT);
+    for (let i = 0; i < Math.max(1, Math.round(horizon * FPS)); i++) this.step(st, goal, DT, gait);
     const sp = Math.hypot(st.v[0], st.v[2]);
     const yaw = sp > 0.3 ? Math.atan2(st.v[0], st.v[2]) : r.yaw;
     return [st.p, st.v, yaw, r];
@@ -419,11 +460,11 @@ export class Controller {
     return st;
   }
   // desired path over the next second: spring from the current root velocity toward the command
-  desiredPath(i0, goal) {
+  desiredPath(i0, goal, gait = null) {
     const r = this.rootState(i0), st = { p: r.p, v: r.v, a: [0, 0, 0] }, pos = [], yaw = [];
     let y = this.legAt(i0).yaw;
     for (let n = 1; n <= 30; n++) {
-      this.step(st, goal, DT);
+      this.step(st, goal, DT, gait);
       if (Math.hypot(st.v[0], st.v[2]) > 0.3) y = Math.atan2(st.v[0], st.v[2]);
       if (n % 10 === 0) { pos.push([st.p[0], st.p[2]]); yaw.push(y); }
     }
@@ -435,7 +476,7 @@ export class Controller {
     const i0 = Math.floor(this.frame);
     this.stats.instantWhy = 'buffer'; this.stats.lastInstantCost = null;
     if (i0 < 2 || i0 + 1 >= this.buffer.length) return false;
-    const q = this.bank.weigh(this.queryRaw(i0, this.desiredPath(i0, goal)));
+    const q = this.bank.weigh(this.queryRaw(i0, this.desiredPath(i0, goal, cmd.gait)));
     const rs = this.rootState(i0), speedNow = Math.hypot(rs.v[0], rs.v[2]);
     const m = this.bank.match(q, { crouch: cmd.gait === 'crouch', action: cmd.action || null, speed: speedNow, stopping: M.vlen(goal) < 0.5, gait: cmd.gait });
     this.stats.instantWhy = 'nomatch';
@@ -497,14 +538,14 @@ export class Controller {
         const fyaw = M.wrap(yc + (a.rootk[2] - y0));
         target = place(win, fp, fyaw);
       } else {
-        const [fp, , fyaw] = this.predictFrom(k, goal, horizon);
+        const [fp, , fyaw] = this.predictFrom(k, goal, horizon, cmd.gait);
         target = place(win, fp, fyaw);
         if (action === 'sit' && forceT === null) this.events.push({ type: 'sit', pos: fp, yaw: fyaw, seat: Math.max(0.3, M.P(target[0], 0)[1] - 0.12) });
       }
       allowed = forceT ? [forceT] : a.fight ? [Math.max(MIN_TOKENS, Math.min(needT, 8)), Math.max(MIN_TOKENS, Math.min(needT, 8)) + 1] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
       if (!allowed.length) allowed = [MAX_TOKENS];
     } else {
-      const [fp, fv, fyaw] = this.predictFrom(k, goal, horizon);
+      const [fp, fv, fyaw] = this.predictFrom(k, goal, horizon, cmd.gait);
       const fwd = [Math.sin(fyaw), Math.cos(fyaw)], right = [fwd[1], -fwd[0]];
       const vl = [fv[0] * right[0] + fv[2] * right[1], fv[0] * fwd[0] + fv[2] * fwd[1]];
       const crouch = cmd.gait === 'crouch', sp = Math.hypot(vl[0], vl[1]);
@@ -535,6 +576,7 @@ export class Controller {
     k = Math.min(Math.max(k, 3), this.buffer.length - 1);
     if (!this.queue.length) this.presteer(goal, k);
     const action = this.queue.shift() || null;
+    if (this.popRetry && !action) goal = this.throughSide(goal, k); // the last plan flipped the body: turn via 90 deg first
     const { context, target, allowed, a } = this.buildRequest(cmd, goal, k, { action });
     const info = { kAbs: this.base + k, t0: performance.now(), action, warpSeq: this.warpSeq, epoch: this.epoch };
     this.pending = true;
@@ -553,6 +595,10 @@ export class Controller {
     if (info.epoch !== this.epoch) { this.stats.discarded++; return; } // planned before an instant transition replaced the future
     const k = info.kAbs - this.base, now = this.frame, before = this.display;
     if (k < 3 || k > this.buffer.length) return; // stale (cannot happen with one request in flight)
+    if (!info.action && this.popRetry < 2 && maxBodyStep(res.frames, this.sk.names, 2) > POP_DEG) { // body flip: replan
+      this.stats.popRejected++; this.popRetry++; this.framesSincePlan = 1e6; return;
+    }
+    this.popRetry = 0;
     let frames = res.frames;
     for (const w of this.warps) if (w.seq > info.warpSeq) frames = frames.map((f, i) => { const a = warpAngle(w, info.kAbs + i); return a ? rotateFrame(f, w.pivot, a) : f; });
     if (k < this.buffer.length) { // seam mismatch between the frame being replaced and the new first frame (diagnostics)

@@ -10,6 +10,7 @@ const FPS = 30, H = [10, 20, 30];
 // feature groups: path (6), facing along the path (6), feet positions (6), feet velocities (6), root velocity (2)
 const GROUPS = [[0, 6, 1.0], [6, 12, 1.4], [12, 18, 0.8], [18, 24, 1.2], [24, 26, 2.0]];
 export const NF = 26;
+const GAIT_MISMATCH = 2, family = (g) => (g === 'run' || g === 'sprint' ? 'run' : g === 'crouch' || g === 'crouch_stop' ? 'crouch' : g);
 
 // R(-yaw) for the yaw convention facing = (sin yaw, cos yaw): maps the facing direction to +Z
 const local = (g, yaw, p) => { const c = Math.cos(yaw), s = Math.sin(yaw), dx = p[0] - g[0], dz = p[1] - g[1]; return [c * dx - s * dz, s * dx + c * dz]; };
@@ -91,7 +92,9 @@ export class TransitionBank {
       const isStop = e.gait === 'stop' || e.gait === 'crouch_stop';
       if (!action && stopping !== null && isStop !== stopping) continue; // intent first: stop entries only for stops
       if (action && cnd.f > 6) continue; // enter an action near its start
-      const c = (pathOnly ? this.costFeet(q, i) : this.cost(q, i)) + (gait && !action && !stopping && e.gait !== gait ? 0.25 : 0);
+      // another gait costs a little within a family (run/sprint) and a lot across (a walking turn is no jog start)
+      const gp = !gait || action || stopping || e.gait === gait ? 0 : family(e.gait) === family(gait) ? 0.25 : GAIT_MISMATCH;
+      const c = (pathOnly ? this.costFeet(q, i) : this.cost(q, i)) + gp;
       if (c < bestCost) { bestCost = c; best = i; }
     }
     return best < 0 ? null : { ci: best, cost: bestCost };
