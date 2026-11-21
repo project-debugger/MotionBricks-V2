@@ -56,13 +56,18 @@
 - The body layer (muscle bulges, breathing, soft tissue, mouth opening when out of breath) is
   procedural and tuned by eye; the model and the mocap contain no muscle, breath or face data.
   The mesh has no eyelids or separately skinned eyes, so there is no blinking or eye motion.
-- Animals in the web playground are driven by a small network trained here on 41 minutes of dog
-  motion capture (CC BY-NC 4.0, non-commercial). Only the dog is real data; the other species reuse
-  it re-proportioned and time-scaled, so a horse, deer or elephant moves like a large dog (no
-  hoofed gaits, no columnar elephant legs, no rabbit hopping). The data has lying down, rearing up
-  and about ten forward leaps, which are learned; it has almost no sitting, so Sit lies down, and
-  the elephant rears instead of jumping. Bodies are built from primitive shapes, with no fur or
-  skin deformation. The SOMA model itself was not retrained: it was released without training code.
+- Animals in the web playground are realistic Sketchfab models (CC BY, one CC BY-SA, the cat CC BY-NC)
+  driven by a small network trained here on 41 minutes of dog motion capture (CC BY-NC 4.0,
+  non-commercial). Only the dog is real motion data; every other species moves like a dog on its own
+  body (the horse does not trot or canter like a horse, the elephant bends its legs like a dog, the
+  rabbit runs instead of hopping, the bear is not plantigrade). The data has lying down, rearing up and
+  about ten forward leaps, which are learned; it has almost no sitting, so Sit lies down, and the
+  elephant rears instead of jumping. Rearing is not allowed in the 1.6 s after a leap (that transition
+  twisted the bear, tiger and horse models). No freely licensed, rigged and realistic deer or lion was
+  found, so those two species were replaced; a polar bear model was dropped because the dog's leg angles
+  folded its short legs into the body. Fur is texture only (no fur simulation), and the models' own
+  facial bones (ears, jaw, eyes) are not animated. The SOMA model itself was not retrained: it was
+  released without training code.
 - Fighting moves: the key poses are hand-built by IK, the motion into and out of them is SOMA; the
   model was not trained on fighting, so strikes are less crisp than captured martial arts.
 - Target windows come from 4,737 mocap frames (with mirrored copies); straight running near

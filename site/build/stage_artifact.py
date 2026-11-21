@@ -2,8 +2,8 @@
 """Stage the claude.ai artifact copy of the playground (Light model only) into a directory.
 
 claude.ai artifacts take standard web media types only and at most 15 MB per binary file, so every
-.bin file (model parts, motion targets, mesh) is copied byte-for-byte under a .wasm name; the page's
-<meta name="soma-bin-ext"> tells main.js, and models.json lists the renamed parts.
+.bin and .glb file (model parts, motion targets, meshes, animal models) is copied byte-for-byte under a
+.wasm name; the page's <meta name="soma-bin-ext"> tells main.js, and models.json lists the renamed parts.
 
     python3 site/build/make_index.py && python3 site/build/stage_artifact.py OUT_DIR [--models light]
 """
@@ -29,14 +29,15 @@ def main():
     for f in (SITE / "js").glob("*.js"):
         shutil.copy(f, out / "js" / f.name)
     for sub, files in {"vendor/ort": ["ort.wasm.min.mjs", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"],
-                       "vendor/three": ["three.module.min.js"]}.items():
+                       "vendor/three": ["three.module.min.js", "addons/loaders/GLTFLoader.js", "addons/utils/BufferGeometryUtils.js"]}.items():
         (out / sub).mkdir(parents=True)
         for f in files:
+            (out / sub / f).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(SITE / sub / f, out / sub / f)
         shutil.copy(SITE / sub / "LICENSE", out / sub / "LICENSE.txt")
     for f in (SITE / "data").rglob("*"):
         if f.is_file():
-            dst = out / f.relative_to(SITE).with_suffix(".wasm" if f.suffix == ".bin" else f.suffix)
+            dst = out / f.relative_to(SITE).with_suffix(".wasm" if f.suffix in (".bin", ".glb") else f.suffix)
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(f, dst)
     manifest = json.loads((SITE / "models/models.json").read_text())

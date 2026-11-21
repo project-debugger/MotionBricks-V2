@@ -8,7 +8,7 @@
 > The web playground's animals (`site/`) do not use SOMA: they run a separate, small mode-adaptive
 > network trained in this repository on 41 minutes of dog motion capture (`tools/animal/train_mann.py`,
 > CC BY-NC 4.0 data, non-commercial). Only the dog is real data; the other species are the dog's
-> motion re-proportioned. See `site/README.md`, "Animals (trained network)".
+> motion on realistic Creative Commons models (`site/js/animalmesh.js`). See `site/README.md`, "Animals".
 
 ## What is implemented
 

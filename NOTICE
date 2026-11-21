@@ -21,10 +21,27 @@ SOMA body mesh (site/data/soma_mesh.*): extracted from the upstream MotionBricks
 soma_base_skel_minimal_no_root.usd, NVIDIA, CC BY 4.0.
 
 site/vendor/ redistributes, unmodified: onnxruntime-web 1.31.1 (Microsoft, MIT), three.js 0.170.0
-(MIT); site/coi-serviceworker.js (Guido Zuidhof, MIT). Licence texts are in site/vendor/.
+(MIT, including addons/loaders/GLTFLoader.js and addons/utils/BufferGeometryUtils.js);
+site/coi-serviceworker.js (Guido Zuidhof, MIT). Licence texts are in site/vendor/.
 
 
 site/data/animal/dognet.*: network weights trained in this repository (tools/animal/train_mann.py) on the
 dog motion capture of Zhang, Starke, Komura and Saito, "Mode-Adaptive Neural Networks for Quadruped Motion
 Control" (SIGGRAPH 2018), https://github.com/sebastianstarke/AI4Animation, licensed CC BY-NC 4.0. The weights
 are a derivative of that data: non-commercial use only, with attribution. The raw data is not redistributed.
+
+site/data/animal/models/*.glb: 3D animal models from Sketchfab (downloaded from the Objaverse mirror,
+https://huggingface.co/datasets/allenai/objaverse), modified for the web demo (animations removed, textures
+resized and re-encoded; tools/animal/pack_models.py). Each keeps its own licence:
+  dog.glb       "Animated Dog, Shiba Inu" by quander, CC BY 4.0, https://sketchfab.com/3d-models/9abfce885a834399b2c3ccaed51cd474
+  wolf.glb      "Wolf" by HiagoTadeu, CC BY 4.0, https://sketchfab.com/3d-models/9e7aceacef0f4486b605abdf1f62e4ac
+  fox.glb       "Fox" by alexanders823, CC BY 4.0, https://sketchfab.com/3d-models/4e37c303f8a241aaa2511bd9f3019273
+  cat.glb       "Cat - Walking" by pamoan10, CC BY-NC 4.0 (non-commercial), https://sketchfab.com/3d-models/827aa2c7951747599629700703050673
+  horse.glb     "Horse" by alainsorazu, CC BY-SA 4.0 (this modified copy is shared under CC BY-SA 4.0), https://sketchfab.com/3d-models/bef74ed402cc40e996eea028668d3c1c
+  bear.glb      "Bear" by Nyilonelycompany, CC BY 4.0, https://sketchfab.com/3d-models/ce0d5eb86cf5459bb6bd20244cb44b27
+  elephant.glb  "walking elephant" by syaharanichan, CC BY 4.0, https://sketchfab.com/3d-models/2705e7483341479e8015d996cd766611
+  tiger.glb     "Running Tiger" by francescolima74, CC BY 4.0, https://sketchfab.com/3d-models/fc2c7fd74dd04e39935803b884c77258
+  jaguar.glb    "jaguar" by Ear.Rodriguez, CC BY 4.0, https://sketchfab.com/3d-models/91c61c329d2a4668816f81f08dfcd492
+  rabbit.glb    "Rabbit Rigged" by FourthGreen, CC BY 4.0, https://sketchfab.com/3d-models/e7213589744d436b9d96e2dbb31198a5
+Licences: https://creativecommons.org/licenses/by/4.0/, https://creativecommons.org/licenses/by-sa/4.0/,
+https://creativecommons.org/licenses/by-nc/4.0/. The licences are as declared by the uploaders on Sketchfab.

@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GLB preview</title>
+<style>html,body{margin:0;background:#cfd6dd}canvas{display:block}</style>
+<script type="importmap">{ "imports": { "three": "../../vendor/three/three.module.min.js" } }</script>
+<!-- Renders one GLB (rest pose or a frame of its first animation) from the side: ?f=_cand/x.glb&t=0.4&yaw=90 -->
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from '../../vendor/three/addons/loaders/GLTFLoader.js';
+const q = new URLSearchParams(location.search);
+const W = +(q.get('w') || 480), H = +(q.get('h') || 360);
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(W, H); renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.outputColorSpace = THREE.SRGBColorSpace; document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xcfd6dd);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7f72, 1.6)); const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(3, 6, 4); scene.add(sun);
+try {
+  const g = await new GLTFLoader().loadAsync(q.get('f'));
+  const root = g.scene; scene.add(root);
+  const t = q.get('t');
+  if (t !== null && g.animations.length) { const mix = new THREE.AnimationMixer(root); const a = mix.clipAction(g.animations[+(q.get('clip') || 0)]); a.play(); mix.setTime(+t * a.getClip().duration); }
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3(); root.traverse((o) => { if (o.isSkinnedMesh) { o.computeBoundingBox(); box.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld)); } else if (o.isMesh) { o.geometry.computeBoundingBox(); box.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
+  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()), r = Math.max(s.x, s.y, s.z);
+  const yaw = THREE.MathUtils.degToRad(+(q.get('yaw') || 90)), cam = new THREE.PerspectiveCamera(30, W / H, r / 100, r * 100);
+  cam.position.set(c.x + Math.sin(yaw) * r * 2.3, c.y + r * 0.35, c.z + Math.cos(yaw) * r * 2.3); cam.lookAt(c);
+  renderer.render(scene, cam);
+  let skins = 0; root.traverse((o) => { if (o.isSkinnedMesh) skins++; });
+  window.RESULT = { size: s.toArray().map((v) => +v.toFixed(3)), center: c.toArray().map((v) => +v.toFixed(3)), anims: g.animations.map((a) => [a.name, +a.duration.toFixed(2)]), skins };
+} catch (e) { window.RESULT = { error: String(e && e.stack || e) }; }
+</script>

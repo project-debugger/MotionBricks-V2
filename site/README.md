@@ -122,11 +122,12 @@ arm, chambered and extended leg, forearms up) that the SOMA network moves into f
 motion and back out of to the stance; from standing (and jab / cross / front kick from walking)
 they are in the instant-transition bank, otherwise they are generated live.
 
-## Animals (trained network)
+## Animals (trained network, realistic models)
 
-Settings, Character: Dog, Wolf, Fox, Cat, Horse, Deer, Bear, Elephant, Rabbit, Lion (or "Play an
-animal" on the start screen, no model download). The SOMA network only knows human motion and was
-released without training code, so the animals have their own network, trained here from scratch:
+Settings, Character: Dog, Wolf, Fox, Cat, Horse, Brown bear, Elephant, Tiger, Jaguar, Rabbit (or "Play an
+animal" on the start screen; each model is 0.2-1.9 MB and loads when first picked). The SOMA network only knows
+human motion and was released without training code, so the animals have their own network, trained here from
+scratch, driving realistic skinned 3D models:
 
 - **Data**: 41 minutes of dog motion capture from Zhang, Starke, Komura and Saito, "Mode-Adaptive
   Neural Networks for Quadruped Motion Control" (SIGGRAPH 2018), CC BY-NC 4.0 (non-commercial use
@@ -141,18 +142,26 @@ released without training code, so the animals have their own network, trained h
   validation loss 0.24 on 5 held-out clips (training loss 0.08).
 - **Runtime** (`js/animalnet.js`): evaluated every frame in plain JavaScript (about 1.5 ms; matches
   PyTorch to 1e-6), bone lengths kept. Paws the network marks as in contact stay planted (up to
-  10 cm of lag before they slide, never beyond the leg's reach) with two-bone leg IK.
-- **Measured** (`build/test/animal_sim.html`, dog): frame-to-frame joint acceleration of the network
-  output is at or below the real mocap's in every gait (walk 1.7 vs 2.5 mm/frame², trot 5.3 vs
-  5.5, gallop 6.7 vs 7.6), so the motion is as smooth as the recording. Planted paws slide
-  0.15 m/s while moving (the recording: 0.10 m/s; before planting: 0.38 m/s).
-- **Bodies** are primitive shapes placed on the network's skeleton: the chest reaches the shoulder
-  joints and the elbows, the rump covers the hip joints; width and length follow each species.
-- **Other species** reuse the dog-trained motion on their own body proportions (legs, body, neck,
-  head, tail lengths) and are time-scaled by size, so larger animals step more slowly.
+  10 cm of lag before they slide, never beyond the leg's reach).
+- **Bodies** (`js/animalmesh.js`): Creative Commons models from Sketchfab, taken from the Objaverse
+  mirror on Hugging Face and packed with `tools/animal/pack_models.py` (animations removed, textures at
+  most 1024 px; credits in the settings panel and `NOTICE`). Each model gets a small bone map (pelvis,
+  spine, neck, head, four legs, tail). Every frame each mapped bone is turned rigidly so its part of the
+  body lines up with the network's joints (the body's left axis fixes the twist); the spine and tail bend
+  progressively; a two-bone IK puts every paw exactly on the network's planted paw. The network's legs are
+  scaled to each model's leg lengths and the body is pitched so front and hind paws stand level. Bones the
+  map does not name (ears, jaw, toes, trunk, mane) follow their parents. Network plus bone update: about
+  1.5 ms per frame.
+- **Measured** (`build/test/animal_sim.html`, dog; `&model=1` includes the bone update): frame-to-frame
+  joint acceleration of the network output is at or below the real mocap's in every gait (walk 1.7 vs
+  2.5 mm/frame², trot 5.3 vs 5.5, gallop 6.7 vs 7.6), so the motion is as smooth as the recording.
+  Planted paws slide 0.15 m/s while moving (the recording: 0.10 m/s; before planting: 0.38 m/s).
+- **Other species** move with the dog-trained motion on their own body proportions and are time-scaled
+  by size (larger animals step more slowly).
 - Controls: move, Sprint (fast gait), Jump (leap), Punch / Kick (pounce), Dodge (side jump),
   Block (rear up; from a run the animal pulls up first), Duck or Sit (lie down / get up). The
-  elephant rears instead of jumping. Settings can switch back to the earlier procedural animation.
+  elephant rears instead of jumping. Settings can switch back to the earlier procedural animation
+  (simple shapes).
 
 ## Slow devices (phones)
 
@@ -239,15 +248,17 @@ js/bank.js              transition bank + motion-matching features
 js/body.js              muscles, breathing, soft tissue (vertex shader)
 js/fight.js             fighting key poses (IK on the idle pose)
 js/animals.js           species shapes + the earlier procedural animal animation
-js/animalnet.js         trained animal network: JS inference, control loop, paw planting, bodies
+js/animalnet.js         trained animal network: JS inference, control loop, paw planting
+js/animalmesh.js        realistic animal models: bone maps, retargeting onto skinned meshes, credits
 js/settings.js          presets and defaults
 js/codec.js             SOMA encode/decode, endpoint correction, velocity matching, joint limits
 js/math3d.js            quaternion and pose helpers
 js/worker.js            model download and cache, onnxruntime-web inference
 data/                   skeleton, action windows, clips (30 fps + mirrored), transition bank,
-                        joint limits, SOMA body mesh
+                        joint limits, SOMA body mesh; animal/: trained network,
+                        models/*.glb (10 animals, CC licences, see NOTICE)
 models/                 models.json + model parts (14 x 14 MB)
-vendor/                 onnxruntime-web 1.31.1, three.js 0.170.0 (MIT, unmodified)
+vendor/                 onnxruntime-web 1.31.1, three.js 0.170.0 + GLTFLoader (MIT, unmodified)
 coi-serviceworker.js    COOP/COEP shim for static hosts (MIT)
 build/                  dev server, index builder, artifact stager, parity and timing tests
                         (test/sim.html + run_sim.cjs; controller_baseline.js is the pre-fix

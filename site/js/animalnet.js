@@ -71,12 +71,12 @@ const DOG_SPEED = { walk: 0.9, run: 2.0, sprint: 3.6, crouch: 0.6 }; // m/s in t
 const DOG_HIP = 0.469;
 
 export class NeuralAnimal {
-  constructor(THREE, scene, key, net) {
-    this.THREE = THREE; this.key = key; this.sp = SPECIES[key]; this.net = net; const m = net.meta;
+  constructor(THREE, scene, key, net, model = null) {
+    this.THREE = THREE; this.key = key; this.sp = SPECIES[key]; this.net = net; this.model = model; const m = net.meta;
     this.names = m.points; this.parents = m.parents; this.rest = m.rest_lengths; this.P = this.names.length;
     this.ix = Object.fromEntries(this.names.map((n, i) => [n, i]));
     const sp = this.sp;
-    this.scale = sp.hip / DOG_HIP; this.size = Math.max(sp.hip, sp.sh); this.timeScale = 1 / Math.sqrt(this.scale);
+    this.scale = (model ? model.hips : sp.hip) / DOG_HIP; this.size = model ? model.hips * 1.05 : Math.max(sp.hip, sp.sh); this.timeScale = 1 / Math.sqrt(this.scale);
     // per-bone length factors: legs, body, neck/head, tail follow the species proportions
     const dogFront = 0.152 + 0.178 + 0.072, dogHind = 0.16 + 0.18 + 0.108;
     const legF = (sp.front[0] + sp.front[1] + sp.front[2]) / (this.scale * dogFront), legH = (sp.hind[0] + sp.hind[1] + sp.hind[2]) / (this.scale * dogHind);
@@ -91,10 +91,26 @@ export class NeuralAnimal {
       if (/Tail/.test(n)) return tailK;
       return 1;
     });
+    if (model) { // a skinned model: bone lengths measured on it, so the network's paws land under the model's
+      const L = model.legLengths(), kF = L.front / (0.402 * this.scale), kH = L.hind / (0.448 * this.scale);
+      this.boneK = this.names.map((n) => (/Arm|Hand/.test(n) ? kF : /Leg|Foot/.test(n) && !/UpLeg/.test(n) ? kH : 1));
+      // longer (shorter) front legs than the dog's: pitch the body up (down) so all four paws stand on the ground
+      const lp0 = this.localPose(m.start_pose), avg = (a, b, k) => (lp0[this.ix[a] * 3 + k] + lp0[this.ix[b] * 3 + k]) / 2;
+      const yf = avg('LeftHandEnd', 'RightHandEnd', 1), zf = avg('LeftHandEnd', 'RightHandEnd', 2), yh = avg('LeftFootEnd', 'RightFootEnd', 1), zh = avg('LeftFootEnd', 'RightFootEnd', 2);
+      this.pitch = Math.atan2(yh - yf, zf - zh);
+      const sp0 = m.start_pose, Q = (n) => { const i = this.ix[n] * 3; return new THREE.Vector3(sp0[i], sp0[i + 1], sp0[i + 2]); };
+      const x = Q('Spine1').sub(Q('Hips')).normalize(), l = Q('LeftUpLeg').sub(Q('RightUpLeg')), z = l.addScaledVector(x, -l.dot(x)).normalize();
+      const Pn0 = new THREE.Matrix4().makeBasis(x, z.clone().cross(x), z).transpose();
+      const cx = Q('Neck').sub(Q('Spine1')).normalize(), cl = Q('LeftShoulder').sub(Q('RightShoulder')), cz = cl.addScaledVector(cx, -cl.dot(cx)).normalize();
+      const Cn0 = new THREE.Matrix4().makeBasis(cx, cz.clone().cross(cx), cz).transpose();
+      this.netRest = { tailLocal: Q('Tail1End').sub(Q('Tail')).normalize().applyMatrix4(Pn0),
+        neckLocal: Q('Head').sub(Q('Neck')).normalize().applyMatrix4(Cn0), headLocal: Q('HeadEnd').sub(Q('Head')).normalize().applyMatrix4(Cn0) };
+      this.Wi = new Float32Array(this.P * 3);
+    }
     this.root = new THREE.Group(); scene.add(this.root);
-    this.buildBody();
+    if (model) this.root.add(model.group); else this.buildBody();
     this.reset(0, 0, 0);
-    this.dims = this.measureBody(this.world);
+    if (!model) this.dims = this.measureBody(this.world);
   }
   // body blob sizes and anchors from the network's own standing skeleton (yaw 0 faces +Z): the chest reaches just past
   // the shoulder joints and down to the elbows, the rump covers the hip joints; species ratios set width and length
@@ -147,7 +163,7 @@ export class NeuralAnimal {
       if (this.clock - this.jumpAt > 1.0) { this.jumpAt = this.clock; this.jumpKind = name === 'dodge' ? 'side' : name === 'jump' ? 'up' : 'pounce'; }
     } else if (name === 'duck' || name === 'sit') { this.lie = this.lie > 0.5 ? 0 : 1; }
     else if (name === 'stand_up') { this.lie = 0; }
-    else if (name === 'block') { if (this.lie > 0.5) this.lie = 0; else if (this.clock - this.rearAt > 1.8) this.rearAt = this.clock + (this.speed > 1.1 * this.scale ? 0.45 : 0); } // from a run: pull up first, then rear
+    else if (name === 'block') { if (this.lie > 0.5) this.lie = 0; else if (this.clock - this.rearAt > 1.8 && this.clock - this.jumpAt > 1.6) this.rearAt = this.clock + (this.speed > 1.1 * this.scale ? 0.45 : 0); } // from a run: pull up first, then rear; never straight out of a leap
   }
   // ---------------------------------------------------------------- per-frame update
   update(cmd, dt) {
@@ -276,17 +292,26 @@ export class NeuralAnimal {
     return out;
   }
   // species-proportioned world joints: scale about the root, re-length bones by body part, plant on the ground
-  toWorldPose() {
-    const P = this.P, c = Math.cos(this.yaw), s = Math.sin(this.yaw), S = this.scale, lp = new Float32Array(P * 3);
-    lp[0] = this.pose[0] * S; lp[1] = this.pose[1] * S; lp[2] = this.pose[2] * S;
+  // root-frame pose re-lengthed bone by bone, pitched about the hips so a species' front and hind paws stand level
+  localPose(pose) {
+    const P = this.P, S = this.scale, lp = new Float32Array(P * 3);
+    lp[0] = pose[0] * S; lp[1] = pose[1] * S; lp[2] = pose[2] * S;
     for (let j = 1; j < P; j++) {
-      const p = this.parents[j], dx = this.pose[j * 3] - this.pose[p * 3], dy = this.pose[j * 3 + 1] - this.pose[p * 3 + 1], dz = this.pose[j * 3 + 2] - this.pose[p * 3 + 2], k = S * this.boneK[j];
+      const p = this.parents[j], dx = pose[j * 3] - pose[p * 3], dy = pose[j * 3 + 1] - pose[p * 3 + 1], dz = pose[j * 3 + 2] - pose[p * 3 + 2], k = S * this.boneK[j];
       lp[j * 3] = lp[p * 3] + dx * k; lp[j * 3 + 1] = lp[p * 3 + 1] + dy * k; lp[j * 3 + 2] = lp[p * 3 + 2] + dz * k;
     }
+    if (this.pitch) {
+      const c = Math.cos(this.pitch), s = Math.sin(this.pitch), py = lp[1], pz = lp[2];
+      for (let j = 0; j < P; j++) { const y = lp[j * 3 + 1] - py, z = lp[j * 3 + 2] - pz; lp[j * 3 + 1] = py + y * c + z * s; lp[j * 3 + 2] = pz - y * s + z * c; }
+    }
+    return lp;
+  }
+  toWorldPose() {
+    const P = this.P, c = Math.cos(this.yaw), s = Math.sin(this.yaw), S = this.scale, lp = this.localPose(this.pose);
     // ground: the lowest paw that the network says is in contact sits on the floor (smoothed)
     let low = Infinity; this.net.meta.paws.forEach((pn, i) => { const y = lp[this.ix[pn] * 3 + 1]; if (this.contacts[i] > 0.5) low = Math.min(low, y); });
     if (low === Infinity) { let mn = Infinity; for (const pn of this.net.meta.paws) mn = Math.min(mn, lp[this.ix[pn] * 3 + 1]); low = Math.min(mn, this.ground + 0.0); }
-    const pawR = 0.012 * S;
+    const pawR = this.model ? this.model.pawR : 0.012 * S;
     this.ground += (low - pawR - this.ground) * 0.25;
     const out = new Float32Array(P * 3), wx = this.pos[0] * S, wz = this.pos[1] * S;
     for (let j = 0; j < P; j++) { const x = lp[j * 3], z = lp[j * 3 + 2]; out[j * 3] = wx + c * x + s * z; out[j * 3 + 1] = lp[j * 3 + 1] - this.ground; out[j * 3 + 2] = wz - s * x + c * z; }
@@ -326,7 +351,7 @@ export class NeuralAnimal {
     });
     return w;
   }
-  get target() { const w = this.world, h = this.ix.Spine1; return new this.THREE.Vector3(w[h * 3], Math.max(this.sp.hip, this.sp.sh) * 0.9, w[h * 3 + 2]); }
+  get target() { const w = this.world, h = this.ix.Spine1; return new this.THREE.Vector3(w[h * 3], this.model ? this.model.hips * 0.9 : Math.max(this.sp.hip, this.sp.sh) * 0.9, w[h * 3 + 2]); }
   // ---------------------------------------------------------------- body
   buildBody() {
     const T = this.THREE, sp = this.sp;
@@ -349,6 +374,7 @@ export class NeuralAnimal {
     if (sp.tusks) this.tusks = [0, 1].map(() => mesh(this.capsule, mat(sp.tusks, 0.4)));
   }
   render(A, B, f, dt) {
+    if (this.model) { const W = this.Wi; for (let i = 0; i < W.length; i++) W[i] = lerp(A[i], B[i], f); if (!globalThis.SOMA_ANIMAL_REST) this.model.apply(W, this.ix, this.netRest); return; }
     const T = this.THREE, V = (x, y, z) => new T.Vector3(x, y, z), sp = this.sp;
     const J = (n) => { const i = this.ix[n] * 3; return V(lerp(A[i], B[i], f), lerp(A[i + 1], B[i + 1], f), lerp(A[i + 2], B[i + 2], f)); };
     const limb = (o, a, b, r, flat = 1) => { const d = b.clone().sub(a), len = Math.max(1e-4, d.length()); o.position.copy(a).add(b).multiplyScalar(0.5); o.quaternion.setFromUnitVectors(V(0, 1, 0), d.multiplyScalar(1 / len)); o.scale.set(r, (len + 1.4 * r) / 3, r * flat); };

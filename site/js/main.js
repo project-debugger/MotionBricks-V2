@@ -8,8 +8,9 @@ import { ClipLibrary, legIndices } from './library.js';
 import { TransitionBank } from './bank.js';
 import { BodyFX } from './body.js';
 import { registerFightActions } from './fight.js';
-import { Animal, SPECIES, SPECIES_KEYS } from './animals.js';
+import { Animal, SPECIES } from './animals.js';
 import { DogNet, NeuralAnimal } from './animalnet.js';
+import { ANIMAL_MODELS, loadAnimalModel } from './animalmesh.js';
 import { PRESETS, DEFAULTS } from './settings.js';
 
 const $ = (s) => document.querySelector(s);
@@ -26,6 +27,7 @@ async function getJSON(p) { const r = await fetch(BASE + p); if (!r.ok) throw ne
 // hosts that refuse .bin files (claude.ai artifacts) serve the same bytes under another extension
 const BIN_EXT = document.querySelector('meta[name="soma-bin-ext"]')?.content || '.bin';
 async function getBin(p) { p = p.replace(/\.bin$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
+async function getGlb(p) { if (BIN_EXT !== '.bin') p = p.replace(/\.glb$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
 
 // ------------------------------------------------------------------ renderer
 function gridTexture() {
@@ -188,10 +190,11 @@ const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomica
   ['instant', 'Instant response (pre-generated SOMA transitions)'], ['bodyFX', 'Muscles, breathing and soft tissue']];
 function buildPanel(models, onModel, onCharacter) {
   const p = $('#panel-body');
-  const crow = [['human', 'Human', 'SOMA network'], ...SPECIES_KEYS.map((k) => [k, SPECIES[k].name, 'procedural'])].map(([k, n, sub]) => `<button class="seg" data-char="${k}">${n}<small>${sub}</small></button>`).join('');
+  const crow = [['human', 'Human', 'SOMA network'], ...Object.keys(ANIMAL_MODELS).map((k) => [k, ANIMAL_MODELS[k].name, 'trained network'])].map(([k, n, sub]) => `<button class="seg" data-char="${k}">${n}<small>${sub}</small></button>`).join('');
   const mrow = Object.entries(models).map(([k, m]) => `<button class="seg" data-model="${k}" ${m.available ? '' : 'disabled'}>${m.short}<small>${(m.bytes / 1e6).toFixed(0)} MB</small></button>`).join('');
   p.innerHTML = `<h3>Character</h3><div class="segs" id="chars">${crow}</div>
-    <p class="note" style="margin-top:6px">Animals move with a neural network trained here on 41 minutes of dog motion capture (MANN dog data, CC BY-NC 4.0); other species reuse it on their own body proportions. The SOMA network only knows human motion.</p>
+    <p class="note" style="margin-top:6px">Animals are realistic 3D models moved by a neural network trained here on 41 minutes of dog motion capture (MANN dog data, CC BY-NC 4.0); every species uses that dog motion on its own body. The SOMA network only knows human motion.</p>
+    <details class="note"><summary>Animal model credits</summary><ul style="margin:4px 0 0;padding-left:18px">${Object.values(ANIMAL_MODELS).map((m) => `<li>${m.name}: <a href="${m.credit.url}" target="_blank" rel="noopener">${m.credit.title}</a> by ${m.credit.author} (${m.credit.license}), animations removed, textures resized</li>`).join('')}</ul></details>
     <label class="tg"><input id="t-procAnimals" type="checkbox"><span>Use the old procedural animal animation instead</span></label>
     <h3>Model</h3><div class="segs" id="models">${mrow}</div>
     <h3>Preset</h3><div class="segs" id="presets">${Object.keys(PRESETS).map((k) => `<button class="seg" data-preset="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
@@ -287,7 +290,19 @@ async function main() {
   // characters: the SOMA human, or a procedural animal standing where the current character is
   const animals = {}; let animal = null, modelRequested = false;
   const focus = () => (animal ? [...animal.worldXZ(), animal.yaw] : (() => { const w = M.fk(ctrl.display || ctrl.buffer[3], sk.parents); return [w[0], w[2], ctrl.simYaw]; })());
-  const setCharacter = (key) => {
+  const animalModels = {}; let charToken = 0;
+  const setCharacter = async (key) => {
+    const token = ++charToken;
+    const neural = key !== 'human' && S.animalMotion !== 'procedural' && dogNet;
+    let model = null;
+    if (neural && ANIMAL_MODELS[key]) { // realistic skinned model, fetched on first use
+      if (!(key in animalModels)) {
+        $('#hud-model').textContent = `Loading ${ANIMAL_MODELS[key].name}...`;
+        animalModels[key] = await loadAnimalModel(THREE, key, getGlb).catch((e) => { console.warn('animal model unavailable', key, e); return null; });
+      }
+      if (token !== charToken) return; // another character was picked meanwhile
+      model = animalModels[key];
+    }
     const [fx, fz, fyaw] = focus();
     S.character = key; save();
     if (animal) animal.setVisible(false);
@@ -298,12 +313,11 @@ async function main() {
       if (!ready && !modelRequested) { $('#loading').hidden = false; $('#start').hidden = false; $('#go').hidden = false; }
     } else {
       R.body.visible = false; R.chair.visible = false;
-      const neural = S.animalMotion !== 'procedural' && dogNet;
       const ck = `${key}:${neural ? 'net' : 'proc'}`;
-      animal = animals[ck] || (animals[ck] = neural ? new NeuralAnimal(THREE, R.scene, key, dogNet) : new Animal(THREE, R.scene, key));
+      animal = animals[ck] || (animals[ck] = neural ? new NeuralAnimal(THREE, R.scene, key, dogNet, model) : new Animal(THREE, R.scene, key));
       animal.teleport(fx, fz, fyaw); animal.setVisible(true);
       input.sitting = false; $('#b-sit').classList.remove('on');
-      $('#hud-model').textContent = `${SPECIES[key].name} - ${animal instanceof NeuralAnimal ? 'trained network (dog mocap)' : 'procedural'}`;
+      $('#hud-model').textContent = `${ANIMAL_MODELS[key]?.name || SPECIES[key].name} - ${animal instanceof NeuralAnimal ? (animal.model ? 'trained network, realistic model' : 'trained network (dog mocap)') : 'procedural'}`;
       $('#loading').hidden = true;
     }
     document.body.classList.toggle('animal', !!animal);
@@ -317,8 +331,9 @@ async function main() {
   $('#start').hidden = false;
   status(`The real SOMA network runs on this device. First download: about ${(models.models[S.model].bytes / 1e6).toFixed(0)} MB.`);
   $('#go').addEventListener('click', () => { modelRequested = true; loadModel(S.model); });
-  $('#go-animal').addEventListener('click', () => { $('#panel').hidden = false; setCharacter(S.character && S.character !== 'human' ? S.character : 'dog'); });
-  if (S.character && S.character !== 'human' && SPECIES[S.character]) setCharacter(S.character);
+  const savedAnimal = () => (S.character && S.character !== 'human' && ANIMAL_MODELS[S.character] ? S.character : 'dog');
+  $('#go-animal').addEventListener('click', () => { $('#panel').hidden = false; setCharacter(savedAnimal()); });
+  if (S.character && S.character !== 'human') setCharacter(savedAnimal());
 
   $('#gear').addEventListener('click', () => { $('#panel').hidden = !$('#panel').hidden; });
   $('#close').addEventListener('click', () => { $('#panel').hidden = true; });
@@ -333,7 +348,7 @@ async function main() {
     if (animal) {
       if (window.SOMA_HIDE_LANDMARKS) for (const b of R.landmarks) b.visible = false; // debug captures
       if (!window.SOMA_FREEZE) animal.update(command(dt), dt);
-      const t = animal.target, k = 1 - Math.exp(-dt * 6), sc = Math.min(2.6, Math.max(0.28, animal.size / 0.85));
+      const t = animal.target, k = 1 - Math.exp(-dt * 6), sc = Math.min(3.6, Math.max(0.28, animal.size / 0.85));
       camT.x += (t.x - camT.x) * k; camT.z += (t.z - camT.z) * k;
       const d = input.camDist * sc;
       R.camera.position.set(camT.x + Math.sin(input.camYaw) * d, t.y + 0.35 * sc + d * 0.12, camT.z + Math.cos(input.camYaw) * d);

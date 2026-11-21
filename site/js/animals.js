@@ -34,6 +34,10 @@ export const SPECIES = {
   lion: { name: 'Lion', hip: 0.92, sh: 0.98, len: 0.95, w: 0.17, rH: [0.2, 0.24, 0.26], rC: [0.22, 0.29, 0.26], front: [0.38, 0.34, 0.13], hind: [0.42, 0.37, 0.18],
     neck: [0.26, 30], head: [0.17, 0.15, 0.08], ears: 'round', earSize: 0.06, tail: [0.75, -40, 0.03, 'tuft', '#3b2617'], col: ['#c39557', '#e3c79a', '#1c1410'], speeds: [1.3, 3.2, 13], freq: 1.15, attack: 'swipe', kick: 'pounce', wag: 0.3, maneHead: '#6b4423' },
 };
+// species that exist only as realistic models get procedural stand-ins too (for the 'old procedural animation' setting)
+SPECIES.tiger = { ...SPECIES.lion, name: 'Tiger', hip: 0.88, sh: 0.95, maneHead: undefined, tail: [0.8, -30, 0.035, 'thin'], col: ['#d9822b', '#f3e6d0', '#1c1410'], stripes: '#1c1410' };
+SPECIES.jaguar = { ...SPECIES.lion, name: 'Jaguar', hip: 0.66, sh: 0.7, len: 0.78, maneHead: undefined, rH: [0.16, 0.19, 0.21], rC: [0.17, 0.22, 0.21], front: [0.29, 0.26, 0.1], hind: [0.32, 0.28, 0.14], tail: [0.65, -30, 0.03, 'thin'], col: ['#c9a04a', '#efe2c4', '#1c1410'] };
+SPECIES.polarbear = { ...SPECIES.bear, name: 'Polar bear', hip: 1.05, sh: 1.1, col: ['#ecebe4', '#f6f4ee', '#141010'] };
 export const SPECIES_KEYS = Object.keys(SPECIES);
 
 // gait foot phase offsets [LF, RF, LH, RH] and duty factors
