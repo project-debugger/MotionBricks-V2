@@ -39,7 +39,13 @@
   fighting, hit reactions, carrying and object interactions have no clips here and are untested.
 - Dodge uses a combat quick-step as an approximation; sprint is capped by the fastest sample run
   (~5.5 m/s).
-- Target matching uses root velocity only (plus crouch flag); no foot-phase matching.
+- Target matching uses root velocity, stride phase, gait (walk or jog, from the stride period) and the
+  crouch flag; no yaw-rate or terrain matching.
+- Real walking targets (100STYLE) are one performer in a small capture room: the neutral walks run at
+  0.4-1.4 m/s, so the default 1.4 m/s walk still leans on the NVIDIA walk clip, and jogging above 1.7 m/s
+  and running are NVIDIA-only. Walk styles cover walking (plus starts, stops and idling) only; a styled
+  walker runs like the default character. Elderly walks at 0.35 m/s and takes 0.5-1.4 s to commit to a new
+  direction. Walk-to-sprint is about 0.1 s slower than with the NVIDIA clips alone.
 - Fingers, toes beyond their learned 1–2 axes, and the jaw are not predicted by the model: hands
   use a procedural layer (`FingerAnimator`), toes and jaw are clamped to mocap ranges. No hand
   contact, gripping or facial animation.

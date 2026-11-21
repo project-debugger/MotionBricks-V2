@@ -50,6 +50,9 @@ def export_clips(lib, sk, lim) -> None:
 
     clips.bin: per clip, float32 root position [F, 3] then int16 quaternions [F, Jm, 4] (/32767) for the
     Jm joints the network predicts; every other joint takes the relaxed pose from joint_limits.json.
+
+    Real human walking from 100STYLE (CC BY 4.0) is appended when it has been retargeted
+    (tools/mocap/style100.py fetch + retarget). Its turns are balanced left/right, so no mirrored copies.
     """
     from somart.mirror import Mirror
     meta_m = json.loads((ROOT / "showcase/build/cache/soma_mesh.json").read_text())
@@ -79,13 +82,61 @@ def export_clips(lib, sk, lim) -> None:
                             "offset": off, "mirrored": mir})
             blobs.append(blob)
             off += len(blob)
+    sys.path.insert(0, str(ROOT / "tools/mocap"))
+    import style100
+
+    def real_blob(c, offset):
+        loc = lim.apply(c["local"], relax_unmapped=True)
+        q = loc[:, joints, 3:]
+        q = np.where(q[..., 3:4] < 0, -q, q)
+        blob = loc[:, 0, :3].astype(np.float32).tobytes() + np.round(q * 32767).astype(np.int16).tobytes()
+        return blob, {"name": c["name"], "category": c["category"], "frames": int(len(loc)), "offset": offset,
+                      "mirrored": False, "source": "100STYLE"}
+
+    real = style100.load_retargeted()
+    base = [c for c in real if c["style"] == "Neutral"]
+    for c in base:
+        blob, e = real_blob(c, off)
+        entries.append(e)
+        blobs.append(blob)
+        off += len(blob)
+    print(f"{len(base)} real walking clips from 100STYLE" if real else
+          "100STYLE clips not built (tools/mocap/style100.py fetch && retarget): exporting NVIDIA clips only")
+    lic = "Derived from NVIDIA MotionBricks sample clips (NVIDIA Sample Data Evaluation License)"
+    if real:
+        lic += "; clips named 100STYLE/*: " + style100.LICENSE
+    # optional walk styles: one file each, fetched by the page only when the style is chosen.
+    # pace = the style's typical forward-walk speed (75th percentile), used as its walking speed.
+    styles = []
+    (OUT / "styles").mkdir(exist_ok=True)
+    for label, st in style100.WALK_STYLES.items():
+        cs = [dict(c, local=c["local"][:3600]) for c in real if c["style"] == st]  # at most 2 minutes per kind
+        if not cs:
+            continue
+        s_entries, s_blobs, s_off = [], [], 0
+        for c in cs:
+            blob, e = real_blob(c, s_off)
+            s_entries.append(e)
+            s_blobs.append(blob)
+            s_off += len(blob)
+        (OUT / "styles" / f"{st}.bin").write_bytes(b"".join(s_blobs))
+        (OUT / "styles" / f"{st}.json").write_text(json.dumps({
+            "fps": lib.fps, "joints": [sk.names[j] for j in joints], "clips": s_entries, "style": st,
+            "layout": "per clip: float32 root[F,3] then int16 quat[F,Jm,4] (/32767); other joints: relaxed pose",
+            "license": style100.LICENSE}))
+        fw = next(c["local"] for c in cs if c["kind"] == "FW")
+        sp = np.linalg.norm(np.gradient(fw[:, 0, [0, 2]], axis=0), axis=1) * lib.fps
+        pace = round(float(np.percentile(sp[sp > 0.3], 75)) * 20) / 20
+        styles.append({"key": st, "label": label, "file": f"data/styles/{st}", "pace": pace,
+                       "frames": sum(e["frames"] for e in s_entries), "bytes": s_off})
+        print(f"style {label} ({st}): {styles[-1]['frames']} frames, {s_off / 1e6:.2f} MB, pace {pace} m/s")
     with open(OUT / "clips.bin", "wb") as f:
         for b in blobs:
             f.write(b)
     (OUT / "clips.json").write_text(json.dumps({
         "fps": lib.fps, "joints": [sk.names[j] for j in joints], "clips": entries,
         "layout": "per clip: float32 root[F,3] then int16 quat[F,Jm,4] (/32767); other joints: relaxed pose",
-        "license": "Derived from NVIDIA MotionBricks sample clips (NVIDIA Sample Data Evaluation License)"}))
+        "license": lic, "styles": styles}))
     total = sum(e["frames"] for e in entries)
     print(f"{len(entries)} clips, {total} frames ({off / 1e6:.2f} MB) -> clips.bin")
 

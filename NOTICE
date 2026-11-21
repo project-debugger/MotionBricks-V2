@@ -21,6 +21,12 @@ site/data/windows.* contains motion windows derived from them (internal evaluati
 SOMA body mesh (site/data/soma_mesh.*): extracted from the upstream MotionBricks asset
 soma_base_skel_minimal_no_root.usd, NVIDIA, CC BY 4.0.
 
+site/data/clips.* (clips named 100STYLE/*) and site/data/styles/*: motion capture from the 100STYLE dataset by
+Ian Mason, Sebastian Starke and Taku Komura, "Real-Time Style Modelling of Human Locomotion via Feature-Wise
+Transformations and Local Motion Phases" (2022), https://doi.org/10.5281/zenodo.8127870, licensed CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/). Modified: retargeted onto the SOMA rig, trimmed with the
+dataset's frame cuts, resampled to 30 fps and quantized (tools/mocap/style100.py, tools/export_web_data.py).
+
 site/vendor/ redistributes, unmodified: onnxruntime-web 1.31.1 (Microsoft, MIT), three.js 0.170.0
 (MIT, including addons/loaders/GLTFLoader.js and addons/utils/BufferGeometryUtils.js);
 site/coi-serviceworker.js (Guido Zuidhof, MIT). Licence texts are in site/vendor/.

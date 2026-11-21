@@ -21,7 +21,8 @@ const [skel, lim, wmeta, wbin, models] = await Promise.all([getJSON('data/skelet
 const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
 const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk), J = sk.names.length;
 const { ClipLibrary } = await import('../../js/library.js');
-const [cmeta, cbin] = await Promise.all([getJSON('data/clips.json'), getBin('data/clips.bin')]);
+const CL = q.get('clips') || 'data/clips'; // ?clips=<path without extension> to A/B another clip library
+const [cmeta, cbin] = await Promise.all([getJSON(CL + '.json'), getBin(CL + '.bin')]);
 const clips = q.get('ctrl') === 'baseline' || q.has('noclips') ? null : new ClipLibrary(sk, cmeta, cbin, limits);
 const { TransitionBank } = await import('../../js/bank.js');
 const { legIndices } = await import('../../js/library.js');
@@ -30,6 +31,11 @@ const tb0 = performance.now();
 const bank = q.get('ctrl') === 'baseline' || q.has('nobank') ? null : new TransitionBank(sk, bmeta, bbin, limits, legIndices(sk));
 const bankMs = performance.now() - tb0;
 const S = { ...DEFAULTS, model: modelKey, ...JSON.parse(q.get('settings') || '{}') };
+if (q.get('style') && clips) { // ?style=<100STYLE key>: load that walk style and walk in it
+  const w = cmeta.styles.find((x) => x.key === q.get('style'));
+  const [m, b] = await Promise.all([getJSON(w.file.replace(/^data\//, 'data/') + '.json'), getBin(w.file + '.bin')]);
+  clips.addStyle(w.key, m, b, w.pace); S.walkStyle = w.key;
+}
 
 const worker = new Worker(new URL('../../js/worker.js', import.meta.url), { type: 'module' });
 let nextId = 1; const waiting = new Map(); let readyResolve; const ready = new Promise((r) => { readyResolve = r; });
@@ -56,13 +62,17 @@ const PJ = ['LeftFoot', 'RightFoot', 'LeftHand', 'RightHand', 'RightArm', 'LeftL
 // scripted input: [start s, move dir (world x,z) or null, gait]
 const SCRIPT = q.has('actions')
   ? [[0, null, 'run'], [1.5, null, 'run', 'jump'], [4, null, 'run', 'dodge'], [6.5, null, 'run', 'duck'], [9, [0, 1], 'run'], [10.5, [0, 1], 'run', 'jump'], [13, [0, 1], 'run', 'dodge'], [15.5, [0, 1], 'run', 'duck'], [18, null, 'run'], [19.5, null, 'end']]
-  : [[0, null, 'run'], [2, [0, 1], 'run'], [6, [1, 0], 'run'], [9, [-1, 0], 'run'], [12, null, 'run'],
-  [14, [0.7071, 0.7071], 'walk'], [17, [0, 1], 'sprint'], [19, null, 'run'], [21.5, null, 'end']];
+  : q.get('script') === 'walk' // walking: straight, turns, a half-pushed stick (slow walk), stop, then a jog start
+    ? [[0, null, 'walk'], [1.5, [0, 1], 'walk'], [6, [1, 0], 'walk'], [9.5, [0.5, -0.5], 'walk'], [13.5, [0, 0.5], 'walk'], [17.5, null, 'walk'],
+      [19.5, [-1, 0], 'run'], [23, null, 'run'], [25, null, 'end']]
+    : [[0, null, 'run'], [2, [0, 1], 'run'], [6, [1, 0], 'run'], [9, [-1, 0], 'run'], [12, null, 'run'],
+      [14, [0.7071, 0.7071], 'walk'], [17, [0, 1], 'sprint'], [19, null, 'run'], [21.5, null, 'end']];
 let lastSeg = -1;
 const cmdAt = (t) => { let c = SCRIPT[0]; for (const s of SCRIPT) if (t >= s[0]) c = s; return c; };
-const gaitSpeed = { walk: S.walkSpeed, run: S.runSpeed, sprint: S.sprintSpeed };
+const gaitSpeed = { walk: clips?.styles?.[S.walkStyle]?.pace ?? S.walkSpeed, run: S.runSpeed, sprint: S.sprintSpeed };
 const rec = [];
-const iR = sk.names.indexOf('RightLeg'), iL = sk.names.indexOf('LeftLeg');
+const iR = sk.names.indexOf('RightLeg'), iL = sk.names.indexOf('LeftLeg'), iLT = sk.names.indexOf('LeftToeBase'), iRT = sk.names.indexOf('RightToeBase');
+const tgtUse = {}, tgtLine = []; let lastTgt = null;
 let prevPose = null, t0 = performance.now(), last = t0, clampedFrames = 0;
 const updMs = []; let nanFrames = 0, firstNaN = null; const spikes = [], events = []; let lastGen = 0, lastInst = 0, lastLate = 0;
 const JNAMES = ['Hips', 'Chest', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightArm', 'RightForeArm', 'RightHand', 'LeftFoot', 'RightFoot', 'Head', 'LeftToeBase', 'RightToeBase'], jrec = [], legrec = [];
@@ -99,7 +109,10 @@ await new Promise((done) => {
     prevStages = ctrl.lastStages;
     if (maxRot > 30 && spikes.length < 40) spikes.push([+t.toFixed(2), sk.names[maxJ], +maxRot.toFixed(0), ctrl.stats.instant, ctrl.stats.generations]);
     prevPose = pose;
-    rec.push({ t, dt, x: w[0], z: w[2], y: w[1], yaw: headingFromHips(M.P(w, iR), M.P(w, iL)), goal: c[1] ? [c[1][0] * gaitSpeed[c[2]], c[1][1] * gaitSpeed[c[2]]] : [0, 0], atEnd, maxRot });
+    const lt = ctrl.stats.lastTarget; if (lt && lt !== lastTgt) { lastTgt = lt; const e = clips && clips.cand.find((x) => x.ci === clips.clips.findIndex((cc) => cc.name === lt.clip) && x.f === lt.f);
+      const key = `${c[2]}:${lt.clip.startsWith('100STYLE') ? '100STYLE' : 'NVIDIA'}:${e && e.run !== null ? (e.run ? 'runStride' : 'walkStride') : 'noStride'}`; tgtUse[key] = (tgtUse[key] || 0) + 1; if (q.has('tl')) tgtLine.push([+t.toFixed(2), c[2], lt.clip.replace(/^locomotion\//, '').slice(0, 44), lt.f, e ? +e.speed.toFixed(2) : null, e ? e.v.map((x) => +x.toFixed(2)) : null, e ? e.run : null]); }
+    rec.push({ t, dt, x: w[0], z: w[2], y: w[1], yaw: headingFromHips(M.P(w, iR), M.P(w, iL)), goal: c[1] ? [c[1][0] * gaitSpeed[c[2]], c[1][1] * gaitSpeed[c[2]]] : [0, 0], atEnd, maxRot,
+      toes: [iLT, iRT].map((j) => [w[j * 7], w[j * 7 + 1], w[j * 7 + 2]]) });
     if (q.has('joints') && ctrl.lastStages) { const ws = M.fk(ctrl.lastStages.sample, sk.parents), lf = sk.names.indexOf('LeftFoot'), rf = sk.names.indexOf('RightFoot');
       const wi = M.fk(ctrl.lastStages.inert, sk.parents), wf = M.fk(ctrl.lastStages.feet, sk.parents);
       legrec.push([...M.P(ws, lf), ...M.P(ws, rf), M.vlen(M.vsub(M.P(wi, 0), M.P(ws, 0))), M.vlen(M.vsub(M.P(wf, lf), M.P(wi, lf))), M.vlen(M.vsub(M.P(wf, rf), M.P(wi, rf))), ctrl.stats.instant, ctrl.stats.late, ctrl.feet.locked[0] ? 1 : 0, ctrl.feet.locked[1] ? 1 : 0, +ctrl.feet.weight[0].toFixed(2), +ctrl.feet.weight[1].toFixed(2), ...ctrl.sampleContacts(ctrl.time).map((x) => +x.toFixed(2))].map((v) => +(+v).toFixed(4))); }
@@ -124,14 +137,14 @@ rec.forEach((r, i) => {
 // response: per scripted change, time until the motion matches the command
 const resp = [];
 for (let s = 1; s < SCRIPT.length - 1; s++) {
-  const [ts, dir, gait] = SCRIPT[s], gs = dir ? gaitSpeed[gait] : 0;
+  const [ts, dir, gait] = SCRIPT[s], gs = dir ? gaitSpeed[gait] * Math.min(1, Math.hypot(dir[0], dir[1])) : 0;
   let hit = null;
   for (let i = 0; i < rec.length; i++) {
     const r = rec[i]; if (r.t < ts) continue; if (r.t > SCRIPT[s + 1][0]) break;
     const v = vel[i];
     if (!dir) { if (speed[i] < 0.5) { hit = r.t - ts; break; } }
     else {
-      const along = v[0] * dir[0] + v[1] * dir[1];
+      const dn = Math.hypot(dir[0], dir[1]), along = (v[0] * dir[0] + v[1] * dir[1]) / dn;
       if (along > 0.5 * gs && along > 0.85 * speed[i]) { hit = r.t - ts; break; }
     }
   }
@@ -151,6 +164,13 @@ for (let s = 1; s < SCRIPT.length - 1; s++) {
   }
   resp.push({ at: ts, to: dir ? `${gait} ${dir.map((x) => x.toFixed(1)).join(',')}` : 'stop', seconds: hit === null ? null : +hit.toFixed(2), onset: onset === null ? null : +onset.toFixed(2) });
 }
+// foot skate: horizontal toe speed while the toe is on the ground (y < 4 cm)
+const skate = [];
+for (let i = 1; i < rec.length; i++) for (let f = 0; f < 2; f++) {
+  const a = rec[i - 1].toes[f], b = rec[i].toes[f], dt = rec[i].t - rec[i - 1].t;
+  if (b[1] < 0.04 && a[1] < 0.04 && dt > 0) skate.push(Math.hypot(b[0] - a[0], b[2] - a[2]) / dt);
+}
+skate.sort((a, b) => a - b);
 const rots = rec.map((r) => r.maxRot).filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 const nt = netTimes.slice().sort((a, b) => a - b);
@@ -161,6 +181,6 @@ window.RESULT = {
   perJoint: Object.fromEntries(Object.entries(pj).map(([k, v]) => { const a = v.slice().sort((x, y) => x - y); return [k, [+a[Math.floor(a.length * 0.99)].toFixed(1), +a[a.length - 1].toFixed(1)]]; })), rotNaN: rec.filter((r) => !Number.isFinite(r.maxRot)).length, freezeSeconds: +freezeT.toFixed(2), lurchSeconds: +lurchT.toFixed(2), surgeSeconds: +surgeT.toFixed(2),
   maxSpeed: +Math.max(...speed.slice(sm)).toFixed(2), jointRadPerSecP99: +pct(rots, 0.99).toFixed(1), jointRadPerSecMax: +rots[rots.length - 1].toFixed(1),
   updateMsP50: +pct(updMs.slice().sort((a, b) => a - b), 0.5).toFixed(2), updateMsP99: +pct(updMs.slice().sort((a, b) => a - b), 0.99).toFixed(2),
-  responseSeconds: resp, joints: q.has('joints') ? { names: JNAMES, t: rec.map((r) => +r.t.toFixed(3)), w: jrec, legs: legrec } : undefined, trace: q.has('trace') ? rec.map((r, i) => [+r.t.toFixed(3), +r.x.toFixed(3), +r.z.toFixed(3), +speed[i].toFixed(2), r.atEnd ? 1 : 0]) : undefined,
+  responseSeconds: resp, targetUse: tgtUse, targetLine: q.has('tl') ? tgtLine : undefined, footSkate: skate.length ? { contactFrames: skate.length, p50: +pct(skate, 0.5).toFixed(3), p90: +pct(skate, 0.9).toFixed(3), over20cmps: +(skate.filter((x) => x > 0.2).length / skate.length).toFixed(3) } : null, joints: q.has('joints') ? { names: JNAMES, t: rec.map((r) => +r.t.toFixed(3)), w: jrec, legs: legrec } : undefined, trace: q.has('trace') ? rec.map((r, i) => [+r.t.toFixed(3), +r.x.toFixed(3), +r.z.toFixed(3), +speed[i].toFixed(2), r.atEnd ? 1 : 0]) : undefined,
 };
 </script>

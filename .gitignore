@@ -31,3 +31,6 @@ showcase/build/cache/
 site/models/*/model.onnx.local
 site/build/node_modules/
 site/build/package-lock.json
+
+# Downloaded third-party mocap (re-fetch with tools/mocap/style100.py fetch)
+data/external/

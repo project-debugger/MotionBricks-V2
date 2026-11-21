@@ -191,7 +191,8 @@ const SLIDERS = [
 ];
 const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomical joint limits'], ['fingers', 'Procedural fingers'], ['velocityMatching', 'Velocity-matched joins'], ['lookAt', 'Head leads turns'],
   ['instant', 'Instant response (pre-generated SOMA transitions)'], ['bodyFX', 'Muscles, breathing and soft tissue']];
-function buildPanel(models, onModel, onCharacter) {
+let WALK_STYLES = [];
+function buildPanel(models, onModel, onCharacter, onWalkStyle) {
   const p = $('#panel-body');
   const crow = [['human', 'Human', 'SOMA network'], ...Object.keys(ANIMAL_MODELS).map((k) => [k, ANIMAL_MODELS[k].name, 'trained network'])].map(([k, n, sub]) => `<button class="seg" data-char="${k}">${n}<small>${sub}</small></button>`).join('');
   const mrow = Object.entries(models).map(([k, m]) => `<button class="seg" data-model="${k}" ${m.available ? '' : 'disabled'}>${m.short}<small>${(m.bytes / 1e6).toFixed(0)} MB</small></button>`).join('');
@@ -199,6 +200,8 @@ function buildPanel(models, onModel, onCharacter) {
     <p class="note" style="margin-top:6px">Animals are realistic 3D models moved by a neural network trained here on 41 minutes of dog motion capture (MANN dog data, CC BY-NC 4.0); every species uses that dog motion on its own body. The SOMA network only knows human motion.</p>
     <details class="note"><summary>Animal model credits</summary><ul style="margin:4px 0 0;padding-left:18px">${Object.values(ANIMAL_MODELS).map((m) => `<li>${m.name}: <a href="${m.credit.url}" target="_blank" rel="noopener">${m.credit.title}</a> by ${m.credit.author} (${m.credit.license}), animations removed, textures resized</li>`).join('')}</ul></details>
     <label class="tg"><input id="t-procAnimals" type="checkbox"><span>Use the old procedural animal animation instead</span></label>
+    <h3>Walk style</h3><div class="segs" id="walkstyles"><button class="seg" data-walkstyle="natural">Natural<small>default</small></button>${WALK_STYLES.map((w) => `<button class="seg" data-walkstyle="${w.key}">${w.label}<small>${w.pace.toFixed(2)} m/s</small></button>`).join('')}</div>
+    <p class="note" style="margin-top:6px" id="walkstyle-note">Real walking motion capture (100STYLE, CC BY 4.0) used as targets for the SOMA network; a style walks at its own pace. Running is unchanged.</p>
     <h3>Model</h3><div class="segs" id="models">${mrow}</div>
     <h3>Preset</h3><div class="segs" id="presets">${Object.keys(PRESETS).map((k) => `<button class="seg" data-preset="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
     <h3>Tuning</h3>${SLIDERS.map(([k, l, a, b, st, u]) => `<label class="sl"><span>${l} <b id="v-${k}"></b></span><input id="s-${k}" type="range" min="${a}" max="${b}" step="${st}" data-unit="${u}"></label>`).join('')}
@@ -209,6 +212,7 @@ function buildPanel(models, onModel, onCharacter) {
     p.querySelectorAll('[data-model]').forEach((b) => b.classList.toggle('on', b.dataset.model === S.model));
     p.querySelectorAll('[data-char]').forEach((b) => b.classList.toggle('on', b.dataset.char === (S.character || 'human')));
     p.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b.dataset.preset === S.preset));
+    p.querySelectorAll('[data-walkstyle]').forEach((b) => b.classList.toggle('on', b.dataset.walkstyle === (S.walkStyle || 'natural')));
     for (const [k] of SLIDERS) { const el = $(`#s-${k}`); el.value = S[k]; $(`#v-${k}`).textContent = `${(+S[k]).toFixed(el.step < 1 ? 2 : 0)} ${el.dataset.unit}`; }
     for (const [k] of TOGGLES) $(`#t-${k}`).checked = !!S[k];
     $('#t-dur').checked = S.durationMode === 'model';
@@ -227,6 +231,7 @@ function buildPanel(models, onModel, onCharacter) {
     if (b.dataset.preset) { Object.assign(S, PRESETS[b.dataset.preset]); S.preset = b.dataset.preset; }
     if (b.dataset.model && b.dataset.model !== S.model) { S.model = b.dataset.model; onModel(S.model); }
     if (b.dataset.char) onCharacter(b.dataset.char);
+    if (b.dataset.walkstyle) { S.walkStyle = b.dataset.walkstyle; if (onWalkStyle) onWalkStyle(S.walkStyle); }
     if (b.id === 'reset') S = { ...DEFAULTS, model: S.model, character: S.character };
     save(); sync();
   });
@@ -252,6 +257,20 @@ async function main() {
   status('Indexing mocap strides and the instant-transition bank...');
   await new Promise((r) => setTimeout(r, 0));
   const clips = new ClipLibrary(sk, cmeta, cbin, limits), bank = new TransitionBank(sk, bmeta, bbin, limits, legIndices(sk));
+  // real walk styles (100STYLE): each style's clips are fetched only when it is chosen
+  WALK_STYLES = cmeta.styles || [];
+  const loadWalkStyle = async (key) => {
+    const w = WALK_STYLES.find((x) => x.key === key);
+    if (!w || clips.styles[key]) return;
+    const note = $('#walkstyle-note'), was = note?.textContent;
+    if (note) note.textContent = `Loading ${w.label} walking (${(w.bytes / 1e6).toFixed(1)} MB)...`;
+    try {
+      const [m, b] = await Promise.all([getJSON(`${w.file}.json`), getBin(`${w.file}.bin`)]);
+      clips.addStyle(key, m, b, w.pace);
+    } catch (e) { console.warn('walk style unavailable', e); S.walkStyle = 'natural'; save(); }
+    if (note) note.textContent = was;
+  };
+  if (S.walkStyle && S.walkStyle !== 'natural') loadWalkStyle(S.walkStyle);
   const R = buildScene({ meta: mmeta, bin: mbin });
   const bodyFX = new BodyFX(THREE, R.geo, sk, R.inverses, limits);
   bodyFX.install(R.skin);
@@ -330,7 +349,7 @@ async function main() {
     }
     document.body.classList.toggle('animal', !!animal);
   };
-  buildPanel(MODELS, (k) => { modelRequested = true; loadModel(k); }, setCharacter);
+  buildPanel(MODELS, (k) => { modelRequested = true; loadModel(k); }, setCharacter, loadWalkStyle);
 
   // start screen: pick a model, then download
   const startRow = $('#start-models');
@@ -409,6 +428,6 @@ async function main() {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, clips, sk, M, get animal() { return animal; } };
+  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, clips, sk, M, loadWalkStyle, get animal() { return animal; } };
 }
 main().catch((e) => { $('#status').textContent = `Error: ${e.message}`; console.error(e); });

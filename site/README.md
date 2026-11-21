@@ -122,6 +122,45 @@ Joint-speed p99 is unchanged (13.8 vs 14.2 rad/s); with 300 ms extra generation 
 still no freezes, lurches or failures. The mocap has no real sidestep or backpedal clips, so the character
 always faces where it runs (no strafing).
 
+## Real walking (100STYLE motion capture)
+
+Walking targets also come from real human motion capture: the **100STYLE** dataset (Mason, Starke and
+Komura, CC BY 4.0), one performer walking, jogging, idling, starting and stopping in many styles. The SOMA
+network still generates every frame; the capture only decides where each segment should end up.
+
+- `tools/mocap/style100.py fetch` downloads just the files used (about 120 MB of a 1.5 GB zip, via HTTP
+  range requests); `retarget` maps them onto the SOMA rig: the SOMA bind pose (an A-pose) is swung onto the
+  performer's T-pose bone by bone, feet and toes stay flat, the pelvis follows the performer's hip sockets
+  scaled by leg length (0.984), and each clip is lowered so the standing foot is at the same height as in the
+  NVIDIA clips. Bone directions agree within 1 deg; stance-foot pitch 21-23 deg vs 19 deg in NVIDIA walks;
+  pelvis height within 1 cm at the same speed (`check`, `tests/test_style100.py`).
+- The default library adds 5 minutes of neutral walking, a slow jog, idling and starts/stops (31 clips, 3.5 MB).
+- **Gait-aware matching** (`js/library.js`): each candidate is labelled walk or jog from its stride period
+  (walks take 31-52 frames, jogs 15-29); walking prefers walking strides and running prefers running ones.
+  Walk and jog overlap in speed (both libraries have jogs at 0.8-2 m/s), so this was ambiguous before.
+- **Walk style** (Settings): Natural, Proud, Strutting, Rushed, Sad, Elderly or Hands behind back. Each style
+  file (1.3-2 MB) is downloaded only when chosen; its clips win wherever they cover the requested speed, and
+  the character walks at the style's own pace (0.35 m/s for Elderly up to 1.95 m/s for Rushed). Running and
+  sprinting stay on the default library. Elated was dropped after looking at it on SOMA (an exaggerated
+  crouched bounce); styles with hands in pockets would sink the hands into the unclothed mesh.
+
+Measured with `build/test/sim.html?script=walk` (walking, turns, a half-pushed stick, stop, jog start),
+3 runs each, NVIDIA clips only vs with 100STYLE:
+
+| | NVIDIA only | + 100STYLE |
+|---|---|---|
+| toe slide while on the ground, median | 0.099 m/s | 0.085 m/s |
+| ... 90th percentile | 1.79 m/s | 1.51 m/s |
+| ground frames sliding > 0.2 m/s | 37 % | 33 % |
+| stop from walking | 0.17-0.24 s | 0.04-0.05 s |
+| slow walk (half stick) reached | 0.09-0.42 s | 0.11-0.12 s |
+| joint speed p99 | 11.7 rad/s | 12.1 rad/s |
+
+On the running script nothing changed beyond noise, except walk-to-sprint, which became about 0.1 s slower
+(0.24 -> 0.34 s): from the new walking pose the transition bank picks a 90 deg entry for a 45 deg change.
+No NaNs, failures, lurches or freezes in any run, also with 450 ms of added delay. Building the library
+takes 159 ms here (73 ms before); one target search 0.8 ms (0.3 ms before).
+
 ## Upper body and hands
 
 - **Calm torso** (`TorsoCalm` in `js/controller.js`, slider "Calm torso twist when running", default 0.4):
@@ -291,7 +330,7 @@ index.src.html          page source (HUD, controls, panel); make_index.py -> ind
 js/main.js              scene, input, settings panel, frame loop
 js/controller.js        planning, splicing, instant transitions, gait-cycle extension,
                         inertialization, foot locking, fingers, head look-ahead
-js/library.js           continuous mocap clips with stride phase (target selection)
+js/library.js           continuous mocap clips with stride phase and gait, walk styles (target selection)
 js/bank.js              transition bank + motion-matching features
 js/body.js              muscles, breathing, soft tissue (vertex shader)
 js/fight.js             fighting key poses (IK on the idle pose)
@@ -302,7 +341,8 @@ js/settings.js          presets and defaults
 js/codec.js             SOMA encode/decode, endpoint correction, velocity matching, joint limits
 js/math3d.js            quaternion and pose helpers
 js/worker.js            model download and cache, onnxruntime-web inference
-data/                   skeleton, action windows, clips (30 fps + mirrored), transition bank,
+data/                   skeleton, action windows, clips (30 fps + mirrored; 100STYLE walking),
+                        styles/ (optional walk styles, loaded on demand), transition bank,
                         joint limits, SOMA body mesh; animal/: trained network,
                         models/*.glb (10 animals, CC licences, see NOTICE)
 models/                 models.json + model parts (14 x 14 MB)
@@ -322,5 +362,8 @@ build/                  dev server, index builder, artifact stager, parity and t
   `soma_base_skel_minimal_no_root.usd`, NVIDIA, CC BY 4.0 (upstream assets licence).
 - Motion windows and clips (`data/windows.*`, `data/clips.*`, mirrored copies included): derived
   from MotionBricks sample clips, NVIDIA Sample Data Evaluation License.
+- Clips named `100STYLE/*` in `data/clips.*` and everything in `data/styles/`: the 100STYLE dataset by Ian Mason,
+  Sebastian Starke and Taku Komura ([doi:10.5281/zenodo.8127870](https://doi.org/10.5281/zenodo.8127870)),
+  CC BY 4.0, retargeted onto the SOMA rig and resampled to 30 fps by `tools/mocap/style100.py`.
 - Transition bank (`data/bank.*`): SOMA model output conditioned on 4-frame windows of those clips.
 - onnxruntime-web (Microsoft), three.js, coi-serviceworker: MIT, licence files in `vendor/`.

@@ -349,7 +349,8 @@ export class Controller {
     this.simPos = [this.simPos[0] + dx, this.simPos[1], this.simPos[2] + dz];
   }
   goalVelocity(cmd) {
-    const s = this.S(), speed = { walk: s.walkSpeed, run: s.runSpeed, sprint: s.sprintSpeed, crouch: s.crouchSpeed }[cmd.gait] ?? s.runSpeed;
+    const s = this.S(), style = this.clips?.styles?.[s.walkStyle]; // a real walk style walks at its own pace
+    const speed = { walk: style ? style.pace : s.walkSpeed, run: s.runSpeed, sprint: s.sprintSpeed, crouch: s.crouchSpeed }[cmd.gait] ?? s.runSpeed;
     const mag = Math.min(1, Math.hypot(cmd.move[0], cmd.move[1]));
     if (mag < 1e-3) return [0, 0, 0];
     const n = Math.hypot(cmd.move[0], cmd.move[1]);
@@ -508,13 +509,14 @@ export class Controller {
       const vl = [fv[0] * right[0] + fv[2] * right[1], fv[0] * fwd[0] + fv[2] * fwd[1]];
       const crouch = cmd.gait === 'crouch', sp = Math.hypot(vl[0], vl[1]);
       if (this.clips) { // phase-aware: continue the stride the character is in
+        const moving = M.vlen(goal) > 0.5, gaitRun = !moving || crouch ? null : cmd.gait !== 'walk';
         let phase = null;
         const ph = sp > 0.5 ? this.phaseAt(k) : null;
         if (ph) {
-          const P = 0.5 * (ph.period + (this.clips.periodFor(sp, crouch) ?? ph.period));
+          const P = 0.5 * (ph.period + (this.clips.periodFor(sp, crouch, gaitRun, s.walkStyle) ?? ph.period));
           phase = ((ph.phase + (validFrames(T) - 4) / P) % 1 + 1) % 1;
         }
-        const wi = this.clips.match({ v: vl, yr: 0, crouch, phase, variation: s.variation, rand: this.rand, moving: sp > 0.5 });
+        const wi = this.clips.match({ v: vl, yr: 0, crouch, phase, variation: s.variation, rand: this.rand, moving: sp > 0.5, gait: moving ? cmd.gait : null, style: s.walkStyle });
         target = place(this.clips.window(wi), fp, fyaw);
         this.stats.lastTarget = { clip: this.clips.clips[this.clips.cand[wi].ci].name, f: this.clips.cand[wi].f, phase, wphase: this.clips.cand[wi].phase };
       } else {
