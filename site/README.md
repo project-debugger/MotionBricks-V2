@@ -140,6 +140,9 @@ scratch, driving realistic skinned 3D models:
   velocities. Output: the next pose, root motion, the future path and paw contacts. 0.77 M weights,
   1.5 MB as float16; trained for 100 epochs (16 minutes) on 253,336 samples on this machine's CPU;
   validation loss 0.24 on 5 held-out clips (training loss 0.08).
+- **One file**: the trained weights and their metadata ship as a single GGUF file,
+  `data/animal/animalnet.gguf` (`tools/animal/to_gguf.py`, read by `js/gguf.js`). GGUF is the ggml / llama.cpp
+  tensor container; this is not a language model and llama.cpp cannot run it.
 - **Runtime** (`js/animalnet.js`): evaluated every frame in plain JavaScript (about 1.5 ms; matches
   PyTorch to 1e-6), bone lengths kept. Paws the network marks as in contact stay planted (up to
   10 cm of lag before they slide, never beyond the leg's reach).
@@ -157,7 +160,12 @@ scratch, driving realistic skinned 3D models:
   2.5 mm/frame², trot 5.3 vs 5.5, gallop 6.7 vs 7.6), so the motion is as smooth as the recording.
   Planted paws slide 0.15 m/s while moving (the recording: 0.10 m/s; before planting: 0.38 m/s).
 - **Other species** move with the dog-trained motion on their own body proportions and are time-scaled
-  by size (larger animals step more slowly).
+  by size (larger animals step more slowly). Per-species styles sit on top (`style` in `js/animalmesh.js`):
+  rabbits bound with each pair of legs together, elephants never gallop and move slower, bears are slower,
+  cats and foxes step quicker, horses run faster. Planted paws keep their toes at the standing angle.
+- **Bigger is not better here**: a 6-expert, 320-unit network trained for 150 epochs reached a lower
+  validation loss (0.221 vs 0.242) but drove worse in closed loop (stops 4x slower, more paw sliding,
+  jerkier trot, twice the cost), so it was not shipped.
 - Controls: move, Sprint (fast gait), Jump (leap), Punch / Kick (pounce), Dodge (side jump),
   Block (rear up; from a run the animal pulls up first), Duck or Sit (lie down / get up). The
   elephant rears instead of jumping. Settings can switch back to the earlier procedural animation

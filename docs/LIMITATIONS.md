@@ -66,7 +66,10 @@
   twisted the bear, tiger and horse models). No freely licensed, rigged and realistic deer or lion was
   found, so those two species were replaced; a polar bear model was dropped because the dog's leg angles
   folded its short legs into the body. Fur is texture only (no fur simulation), and the models' own
-  facial bones (ears, jaw, eyes) are not animated. The SOMA model itself was not retrained: it was
+  facial bones (ears, jaw, eyes) are not animated. Species differences beyond the body (rabbit bounding,
+  no elephant gallop, speed and step rate) are hand-set styles on top of the dog network, not learned.
+  Tripo AI generation was set up but not used: the account had no API credits; free image-to-3D tools
+  (TripoSR, TRELLIS) give unrigged, lower-quality meshes than the Sketchfab models used. The SOMA model itself was not retrained: it was
   released without training code.
 - Fighting moves: the key poses are hand-built by IK, the motion into and out of them is SOMA; the
   model was not trained on fighting, so strikes are less crisp than captured martial arts.
