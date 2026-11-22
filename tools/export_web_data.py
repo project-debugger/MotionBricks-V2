@@ -261,24 +261,28 @@ def relaxed_hands(sk, relaxed: dict) -> dict:
 def fit_limits(lib, sk) -> JointLimits:
     """Anatomical limits from every free clip (locomotion and actions).
 
-    Knees, elbows and toes are hinges: one flexion axis and its range, fitted on the data (retargeted rigs carry a
-    few degrees of twist there, which a free fit would keep and which shows up as bowed shins and twisted forearms).
+    Knees, elbows and toes are hinges about the SOMA network's own axes (configs/skeletons/soma_hinges.json, measured
+    by tools/fit_hinges.py on its raw output); a free fit on retargeted rigs would keep their twist (bowed shins,
+    twisted forearms) and a fit of one axis across rigs lands between them.
     Model joints the retargeters do not drive (jaw, eyes, finger ends) stay at the SOMA rig's reference rotation;
     Neck2, also undriven, stays free. Everything else uses JointLimits.fit (constrained where the data is low-rank).
     """
     from somart.anatomy import JointLimit
     frames = np.concatenate([c.local for c in lib.clips.values()])
     lim = JointLimits.fit(frames, sk)
+    hinges = json.loads(style100.HINGES.read_text())["joints"]
     driven = set(style100.MAP) | set(cmu.MAP)
     out = []
     for name in C.JOINT_NAMES[1:]:
         j = sk.index(name)
-        if name in HINGES:
+        if name in HINGES:  # the network's own axis (tools/fit_hinges.py); range covers the clips and the network
+            h = hinges[name]
+            axis = np.asarray(h["axis"], float)[None]
             r = m3.quat_to_scaled_axis(m3.quat_abs(frames[:, j, 3:]))
-            axis = np.linalg.svd(r, full_matrices=False)[2][:1]
             coords = r @ axis.T
             m = np.radians(3.0)
-            lo, hi = np.percentile(coords, 0.2, axis=0) - m, np.percentile(coords, 99.8, axis=0) + m
+            lo = np.minimum(np.percentile(coords, 0.2, axis=0), h["lo"]) - m
+            hi = np.maximum(np.percentile(coords, 99.8, axis=0), h["hi"]) + m
             rom = ROM_DEG.get(name.removeprefix("Left").removeprefix("Right"))
             if rom:  # the flexion side is the one the data reaches furthest on
                 if -lo[0] > hi[0]:

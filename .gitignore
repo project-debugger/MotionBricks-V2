@@ -34,3 +34,4 @@ site/build/package-lock.json
 
 # Downloaded third-party mocap (re-fetch with tools/mocap/style100.py fetch)
 data/external/
+site/data/raw_output.*

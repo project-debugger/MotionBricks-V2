@@ -36,7 +36,7 @@ try {
   };
   worker.postMessage({ type: 'load', base: BASE + 'models/', model: modelKey, info: models.models[modelKey], skeleton: sk, jointLimits: lim, threads: 4 });
   await ready;
-  const run = (req) => new Promise((resolve, reject) => { const id = nextId++; waiting.set(id, { resolve, reject }); worker.postMessage({ type: 'generate', id, ...req, anatomical: true, velocityMatching: true }); });
+  const run = (req) => new Promise((resolve, reject) => { const id = nextId++; waiting.set(id, { resolve, reject }); worker.postMessage({ type: 'generate', id, ...req, anatomical: q.get('anat') !== '0', velocityMatching: true }); }); // anat=0: raw model output (tools/fit_joint_limits.py measures the network's hinge axes on it)
 
   // ---- contexts: mocap history ending at a 4-frame window, canonicalised (last frame at the origin facing +Z)
   const L = clips.L;

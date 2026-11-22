@@ -229,6 +229,51 @@ class Style100Retargeter:
 FEET = ("LeftFoot", "RightFoot", "LeftToeBase", "RightToeBase")
 
 
+HINGES = ROOT / "configs/skeletons/soma_hinges.json"
+
+
+def hinge_arms(sk: Skeleton, local: np.ndarray, hinges: dict | None = None) -> np.ndarray:
+    """Re-solve each arm so the elbow bends about the SOMA network's own hinge axis (tools/fit_hinges.py).
+
+    A retargeted elbow bends about its source rig's axis, 16-30 deg off the network's, and the joint limits (which
+    project onto the network's axis) would then fold the forearm. Two-bone IK keeps the shoulder, puts the wrist
+    where the performer's is, keeps the elbow on the performer's side, and keeps the hand's world rotation."""
+    if hinges is None:
+        if not HINGES.exists():
+            return local
+        hinges = json.loads(HINGES.read_text())["joints"]
+    out = local.copy()
+    phis = np.radians(np.linspace(-160.0, 10.0, 1701))
+    for side in ("Left", "Right"):
+        a_, f_, h_ = (sk.index(f"{side}{n}") for n in ("Arm", "ForeArm", "Hand"))
+        axis = np.asarray(hinges[f"{side}ForeArm"]["axis"], float)
+        u, f = sk.reference[f_, :3], sk.reference[h_, :3]
+        R = m3.quat_from_axis_angle(axis, phis)                               # [P, 4] candidate elbow rotations
+        reach = u + m3.quat_rotate(R, np.broadcast_to(f, (len(phis), 3)))    # shoulder -> wrist in the Arm frame
+        dist = np.linalg.norm(reach, axis=1)
+        w = sk.fk(out)
+        S, E, H = w[:, a_, :3], w[:, f_, :3], w[:, h_, :3]
+        Wp, Wh = w[:, sk.parents[a_], 3:], w[:, h_, 3:]
+        d = np.linalg.norm(H - S, axis=1)
+        k = np.argmin(np.abs(dist[None, :] - d[:, None]), axis=1)
+        v = reach[k]
+
+        def frame(x, y):  # orthonormal basis (columns) from a main direction and a side hint
+            x = x / np.linalg.norm(x, axis=-1, keepdims=True)
+            y = y - x * np.sum(x * y, -1, keepdims=True)
+            y = y / np.maximum(np.linalg.norm(y, axis=-1, keepdims=True), 1e-9)
+            return np.stack([x, y, np.cross(x, y)], axis=-1)
+
+        Bl = frame(v, np.broadcast_to(u, v.shape))            # Arm frame: wrist direction, elbow side
+        Bw = frame(H - S, E - S)                              # world: performer's wrist direction, elbow side
+        Wa = m3.normalize(m3.quat_from_matrix(Bw @ np.swapaxes(Bl, -1, -2)))
+        Wf = m3.quat_mul(Wa, R[k])
+        for j, q in ((a_, m3.quat_mul(m3.quat_conj(Wp), Wa)), (f_, R[k]), (h_, m3.quat_mul(m3.quat_conj(Wf), Wh))):
+            q = m3.normalize(q)
+            out[:, j, 3:] = np.where(q[:, 3:4] < 0, -q, q)
+    return out
+
+
 def stance_height(sk: Skeleton, local: np.ndarray) -> float:
     """Typical height of the lowest foot joint while standing on it (10th percentile of the per-frame minimum)."""
     w = sk.fk(local)
@@ -256,7 +301,7 @@ def retarget_all(styles: dict[str, list[str]] = STYLES, raw: Path = CACHE / "raw
             a, b = cuts[style].get(k, (0, src.num_frames))
             src = Clip(src.skeleton, src.local[a:b], src.fps, src.name).resample(30.0)
             rt = rt or Style100Retargeter(sk, src.skeleton)
-            local = rt(src.local)
+            local = hinge_arms(sk, rt(src.local))
             local[:, 0, 1] += target_h - stance_height(sk, local)
             f = out / f"{style}_{k}.npz"
             np.savez_compressed(f, local=local.astype(np.float32), fps=30.0, style=style, kind=k,

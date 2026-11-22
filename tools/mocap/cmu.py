@@ -230,7 +230,7 @@ def retarget_all(trials=TRIALS, raw: Path = CACHE / "raw", out: Path = CACHE / "
     written = []
     for t, (cat, cut) in trials.items():
         src = load_trial(t, raw).resample(30.0)
-        local = CMURetargeter(sk, src.skeleton)(src.local)  # one retargeter per subject skeleton
+        local = style100.hinge_arms(sk, CMURetargeter(sk, src.skeleton)(src.local))  # one retargeter per subject skeleton
         if cut:
             local = local[cut[0]:cut[1]]
         local[:, 0, 1] += target_h - style100.stance_height(sk, local)
