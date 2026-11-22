@@ -6,7 +6,7 @@
      reports stability, speed tracking, paw sliding and joint-speed statistics. ?species=dog -->
 <script type="module">
 import * as THREE from 'three';
-import { DogNet, NeuralAnimal } from '../../js/animalnet.js';
+import { DogNet, NeuralAnimal, RESPONSE } from '../../js/animalnet.js';
 import { loadAnimalModel } from '../../js/animalmesh.js';
 import { readAnimalNet } from '../../js/gguf.js';
 const q = new URLSearchParams(location.search), key = q.get('species') || 'dog';
@@ -17,8 +17,13 @@ try {
   // ?model=1: drive the realistic skinned model too (its bone update is then part of the step time)
   const model = q.has('model') ? await loadAnimalModel(THREE, key, (p) => fetch(BASE + p).then((r) => r.arrayBuffer())) : null;
   if (q.has('nosimd')) globalThis.SOMA_NO_SIMD = true;
+  if (q.get('resp')) { const [h, y, n] = q.get('resp').split(',').map(Number); Object.assign(RESPONSE, { pathHalfLife: h, yawRate: y, nearWeight: n }); }
   const net = new DogNet(meta, bin), scene = new THREE.Scene(), a = new NeuralAnimal(THREE, scene, key, net, model);
-  const SCRIPT = [[0, null, 'run'], [2, [0, 1], 'walk'], [6, [0, 1], 'run'], [10, [1, 0], 'run'], [13, [0, 1], 'sprint'], [17, [-1, 0], 'run'],
+  // ?stress=1: sharp reversals and random direction changes every 0.4 s (stability under harsh input)
+  let sr = 11; const srnd = () => ((sr = (sr * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const STRESS = [[0, null, 'run'], [1, [0, 1], 'run'], [3, [0, -1], 'run'], [5, [1, 0], 'sprint'], [6, [-1, 0], 'sprint'], [7.5, [0, 1], 'walk'], [9, [0, -1], 'run'], [10.5, null, 'run'],
+    ...Array.from({ length: 30 }, (_, i) => { const a = srnd() * 6.283; return [11 + i * 0.4, [Math.sin(a), Math.cos(a)], ['walk', 'run', 'sprint'][i % 3]]; }), [23, null, 'run'], [24, null, 'end']];
+  const SCRIPT = q.has('stress') ? STRESS : [[0, null, 'run'], [2, [0, 1], 'walk'], [6, [0, 1], 'run'], [10, [1, 0], 'run'], [13, [0, 1], 'sprint'], [17, [-1, 0], 'run'],
     [20, null, 'run'], [22, null, 'run', 'duck'], [26, null, 'run', 'stand_up'], [29, null, 'run', 'jump'], [31, [0, 1], 'run', 'jump'], [33, null, 'run'], [34, null, 'run', 'block'], [36.5, null, 'run'], [38, null, 'end']];
   const dt = 1 / 60, rec = [], P = a.P, paws = meta.paws.map((n) => a.ix[n]);
   let lastSeg = -1, t = 0, worst = 0, msNet = []; const dump = [], alphas = [];
@@ -31,7 +36,7 @@ try {
     if (q.has('dump') && a.clock !== clk) dump.push({ t: +t.toFixed(3), v: +Math.hypot(a.rootVel[0], a.rootVel[1]).toFixed(3), p: Array.from(a.pose, (x) => +x.toFixed(4)) });
     const w = a.world;
     for (let i = 0; i < w.length; i++) if (!Number.isFinite(w[i])) worst = Infinity; else worst = Math.max(worst, Math.abs(w[i] - (i % 3 === 0 ? a.pos[0] * a.scale : i % 3 === 2 ? a.pos[1] * a.scale : 0)));
-    rec.push({ t, w: Array.from(w), c: (a.pawC || a.contacts).slice(), speed: a.speed, lie: a.lieS, want: c[1] ? c[2] : 'stop' });
+    rec.push({ t, w: Array.from(w), c: (a.pawC || a.contacts).slice(), speed: a.speed, lie: a.lieS, want: c[1] ? c[2] : 'stop', head: Math.atan2(a.rootVel[0], a.rootVel[1]) });
     t += dt;
   }
   // metrics
@@ -51,10 +56,15 @@ try {
   let jerkMax = 0; for (let i = 2; i < rec.length; i++) for (let j = 0; j < P; j++) { const v1 = rec[i].w[j * 3 + 1] - rec[i - 1].w[j * 3 + 1], v0 = rec[i - 1].w[j * 3 + 1] - rec[i - 2].w[j * 3 + 1]; jerkMax = Math.max(jerkMax, Math.abs(v1 - v0) / dt / dt); }
   const ms = msNet.slice().sort((x, y) => x - y);
   window.RESULT = { species: key, frames: rec.length, finite: worst !== Infinity, maxJointOffsetFromRoot: +worst.toFixed(2),
-    speed: { idle: +avgSpeed(0.5, 2).toFixed(2), walk: +avgSpeed(3.5, 6).toFixed(2), run: +avgSpeed(7.5, 10).toFixed(2), sprint: +avgSpeed(14.5, 17).toFixed(2), stop: +avgSpeed(21, 22).toFixed(2) },
-    hipsHeight: { stand: +hipsY(0.5, 2).toFixed(3), lie: +hipsY(24, 26).toFixed(3), standAgain: +hipsY(28, 29).toFixed(3), jumpMax: +maxHipsY(29, 31).toFixed(3), runJumpMax: +maxHipsY(31, 33).toFixed(3) },
-    chestAboveHips: { getUp: +Math.max(...seg(26, 29).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3), idle: +Math.max(...seg(0.5, 2).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3), rear: +Math.max(...seg(34, 36).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3) },
+    speed: q.has('stress') ? null : { idle: +avgSpeed(0.5, 2).toFixed(2), walk: +avgSpeed(3.5, 6).toFixed(2), run: +avgSpeed(7.5, 10).toFixed(2), sprint: +avgSpeed(14.5, 17).toFixed(2), stop: +avgSpeed(21, 22).toFixed(2) },
+    hipsHeight: q.has('stress') ? null : { stand: +hipsY(0.5, 2).toFixed(3), lie: +hipsY(24, 26).toFixed(3), standAgain: +hipsY(28, 29).toFixed(3), jumpMax: +maxHipsY(29, 31).toFixed(3), runJumpMax: +maxHipsY(31, 33).toFixed(3) },
+    chestAboveHips: q.has('stress') ? null : { getUp: +Math.max(...seg(26, 29).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3), idle: +Math.max(...seg(0.5, 2).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3), rear: +Math.max(...seg(34, 36).map((r) => r.w[a.ix.Spine1 * 3 + 1] - r.w[a.ix.Hips * 3 + 1])).toFixed(3) },
     contactPawSlideMs: +(slideSum / Math.max(1, slideN)).toFixed(3), movingPawSlideMs: +(stancePawSlide / Math.max(1, stanceN)).toFixed(3), pawAccP99: +pawAcc[Math.floor(pawAcc.length * 0.99)].toFixed(1), pawAccMax: +pawAcc[pawAcc.length - 1].toFixed(1), verticalAccelMax: +jerkMax.toFixed(1), stepMsP50: +ms[ms.length >> 1].toFixed(2), stepMsP99: +ms[Math.floor(ms.length * 0.99)].toFixed(2),
+    response: q.has('stress') ? null : (() => { // seconds from each input change until the motion follows it
+      const first = (t0, t1, ok) => { for (const r of rec) if (r.t >= t0 && r.t < t1 && ok(r)) return +(r.t - t0).toFixed(2); return null; };
+      const head = (deg) => (r) => r.speed > 0.3 && Math.abs(Math.atan2(Math.sin(r.head - deg / 57.3), Math.cos(r.head - deg / 57.3))) < 0.35;
+      return { start: first(2, 6, (r) => r.speed > 0.3), turn90: first(10, 13, head(90)), turnBack90: first(13, 17, head(0)), turn90b: first(17, 20, head(-90)), stop: first(20, 22, (r) => r.speed < 0.3) };
+    })(),
     dump: q.has('dump') ? dump : undefined,
     alpha: q.has('alpha') ? { top1: [0.5, 0.9, 0.99].map((f) => +alphas.map((x) => x[0]).sort((x, y) => x - y)[Math.floor(alphas.length * f)].toFixed(3)), skipped: [0.005, 0.01, 0.02].map((e) => +(alphas.reduce((n, x) => n + x.filter((v) => v < e).length, 0) / alphas.length / alphas[0].length).toFixed(3)), smallest: +Math.min(...alphas.map((x) => x[x.length - 1])).toExponential(2) } : undefined,
     trace: q.has('trace') ? rec.filter((_, i) => i % 6 === 0).map((r) => ({ t: +r.t.toFixed(2), w: r.w.map((v) => +v.toFixed(3)) })) : undefined };

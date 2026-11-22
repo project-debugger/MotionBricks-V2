@@ -254,8 +254,8 @@ scratch, driving realistic skinned 3D models:
   at most 14 MB (`models/balanced/motionbricks-000NN-of-00013.gguf`, `tools/gguf/build_gguf.py`, read by `js/gguf.js`).
   Shard 1 (1.6 MB) holds the animal network and the metadata, so the animal mode downloads only that shard. GGUF is
   the ggml / llama.cpp container; llama.cpp cannot run these networks, the browser does.
-- **Runtime** (`js/animalnet.js`): evaluated every frame in plain JavaScript (about 1.5 ms; matches
-  PyTorch to 1e-6), bone lengths kept. Paws the network marks as in contact stay planted (up to
+- **Runtime** (`js/animalnet.js`): evaluated every frame in a WebAssembly SIMD kernel (0.2 ms; plain
+  JavaScript fallback; matches PyTorch to 1e-6), bone lengths kept. Paws the network marks as in contact stay planted (up to
   10 cm of lag before they slide, never beyond the leg's reach).
 - **Bodies** (`js/animalmesh.js`): Creative Commons models from Sketchfab, taken from the Objaverse
   mirror on Hugging Face and packed with `tools/animal/pack_models.py` (animations removed, textures at
@@ -281,6 +281,40 @@ scratch, driving realistic skinned 3D models:
   validation loss (0.221 vs 0.242) but drove worse in closed loop (stops 4x slower, more paw sliding,
   jerkier trot, twice the cost), so it was not shipped. A run with noise on the input pose
   (`--noise 0.1 --keep-best`) was worse still (walk too fast, horse never fully lay down, 4x paw sliding).
+- **Rig fixes** (audit: `build/test/animal_rig.html`, `bind_check.html`, frame-exact captures with `SOMA_DEBUG.step`):
+  - *Reference pose = the skin's bind pose.* The node pose stored in each file is whatever frame the author
+    exported: a fox lying curled with its head on the ground, a galloping horse, mid-stride cats. Rest
+    directions, twists and toe angles were measured on it, so the fox's head pointed at the ground and paws
+    turned sideways. The driven chains (and toes) are now put in the bind pose, rebuilt from the inverse bind
+    matrices joint by joint (independent of each file's units and axes), and stood upright. Skin in the
+    reference pose is now undeformed (edge-length spread 1.00-1.06; it was up to 1.64). Faces, ears and manes
+    keep the authored expression.
+  - *Paws*: a planted paw stands flat in its bind orientation turned to the body's heading; a lifted paw
+    flexes like the network's, at most 100 deg and without twist; the leg IK reaches the wrist that puts the
+    toe tip on the network's contact point. (Before, the paw bone was aimed at the toe tip with a minimal
+    rotation, which tipped paws 80-140 deg and twisted them 20-60 deg.)
+  - *No candy-wrapper*: limb bones twist at most 12 deg about their own axis, the head rolls at most 10 deg.
+  - *Misparented helpers*: skin bones that sit on a driven joint but hang off another bone (the horse's hip
+    bone on the second spine bone) follow the joint they sit on.
+  - Dual-quaternion skinning was measured (CPU) and did not reduce skin stretch on these models, so the
+    meshes keep three.js linear blend skinning.
+- **Muscles, breathing, soft tissue**: a vertex-shader layer on each animal mesh (per-bone displacement along
+  the normal, from a small float texture): loaded legs bulge (more when the joint below is flexed), the chest
+  breathes 0.35 times a second at rest up to ~2.2 when sprinting (panting), and the belly rides the body's
+  bounce on a 3.2 Hz spring. Up to ~1 cm on a dog; follows the "Muscles, breathing and soft tissue" setting.
+- **Response and stability**: the network's inputs are kept within 8 standard deviations of its training
+  data. Before, harsh input (180 deg reversals, direction changes every 0.4 s; `animal_sim.html?stress=1`)
+  made every species except the horse diverge, even with the original settings. With that guard the
+  player's path steers the network much harder (`RESPONSE` in `js/animalnet.js`):
+
+  | 90 deg turn / stop | Before | Now |
+  |---|---|---|
+  | dog | 0.7-1.4 s / 1.17 s | 0.5 s / 0.82 s |
+  | cat, fox, rabbit | 0.6-0.9 s / 0.6 s | 0.23-0.38 s / 0.33-0.5 s |
+  | horse | 1.6-2.5 s / 1.8 s | 0.83-0.95 s / 1.08 s |
+  | elephant | 1.5-2.4 s / did not stop in 2 s | 0.85-1.02 s / 1.23 s |
+
+  Sprint speeds are unchanged; paw sliding while moving is within about +/-25 % of before per species.
 - Controls: move, Sprint (fast gait), Jump (leap), Punch / Kick (pounce), Dodge (side jump),
   Block (rear up; from a run the animal pulls up first), Duck or Sit (lie down / get up). The
   elephant rears instead of jumping. Settings can switch back to the earlier procedural animation

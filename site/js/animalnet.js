@@ -42,6 +42,10 @@ function simdKernel(net) {
   } catch { return null; }
 }
 
+// Inputs are kept within 8 standard deviations of the training data (5 also capped sprint speed): harsh input (reversals, direction changes every
+// few tenths of a second) otherwise fed the network states it never saw and its pose/trajectory feedback diverged.
+const Z_MAX = 8, clampZ = (z) => (z > Z_MAX ? Z_MAX : z < -Z_MAX ? -Z_MAX : z);
+
 export class DogNet {
   constructor(meta, buffer) {
     this.meta = meta; const T = {};
@@ -57,7 +61,7 @@ export class DogNet {
   }
   forward(g, x) {
     // gating network -> expert blend
-    let h = new Float32Array(this.ng); for (let i = 0; i < this.ng; i++) h[i] = (g[i] - this.gm[i]) / this.gs[i];
+    let h = new Float32Array(this.ng); for (let i = 0; i < this.ng; i++) h[i] = clampZ((g[i] - this.gm[i]) / this.gs[i]);
     this.gate.forEach((L, li) => {
       const o = new Float32Array(L.o);
       for (let r = 0; r < L.o; r++) { let s = L.b[r]; const off = r * L.i; for (let c = 0; c < L.i; c++) s += L.w[off + c] * h[c]; o[r] = li < 2 ? (s > 0 ? s : Math.exp(s) - 1) : s; }
@@ -71,7 +75,7 @@ export class DogNet {
       const S = this.simd, F = S.F;
       F.set(this.alpha, S.al >> 2);
       let ip = S.a, op = S.b;
-      for (let i = 0; i < this.nx; i++) F[(ip >> 2) + i] = (x[i] - this.xm[i]) / this.xs[i];
+      for (let i = 0; i < this.nx; i++) F[(ip >> 2) + i] = clampZ((x[i] - this.xm[i]) / this.xs[i]);
       S.layers.forEach((L, li) => {
         S.mix(L.w, L.b, S.al, ip, op, L.i, L.noP, this.K);
         if (li < 2) for (let o = op >> 2, e = o + L.o; o < e; o++) { const v = F[o]; F[o] = v > 0 ? v : Math.exp(v) - 1; }
@@ -82,7 +86,7 @@ export class DogNet {
       return y;
     }
     let inp = this.bufA, out = this.bufB;
-    for (let i = 0; i < this.nx; i++) inp[i] = (x[i] - this.xm[i]) / this.xs[i];
+    for (let i = 0; i < this.nx; i++) inp[i] = clampZ((x[i] - this.xm[i]) / this.xs[i]);
     this.layers.forEach((L, li) => {
       const { W, B, i: ni, o: no } = L;
       out.fill(0, 0, no);
@@ -105,6 +109,12 @@ export class DogNet {
 }
 
 // ---------------------------------------------------------------- controller + body
+// How strongly the player's input steers the network: the path's spring half-life (s), how fast the path's heading
+// follows the input (1/s), and the player path's weight in the network's nearest future sample. Measured
+// (build/test/animal_sim.html), before (0.22 s, 7/s, 0.1) -> now: 90 deg turns dog 0.7-1.4 -> 0.48-0.62 s, horse
+// 1.6-2.5 -> 0.83-0.93 s, elephant 1.5-2.4 -> 1.05-1.23 s; stops dog 1.17 -> 0.57 s, horse 1.8 -> 1.08 s (the elephant
+// did not stop within 2 s). Stable under ?stress=1 for every species thanks to the input clamp (Z_MAX).
+export const RESPONSE = { pathHalfLife: 0.08, yawRate: 20, nearWeight: 0.7 };
 const DOG_SPEED = { walk: 0.9, run: 2.0, sprint: 3.6, crouch: 0.6 }; // m/s in the dog's own scale
 const DOG_HIP = 0.469;
 
@@ -243,7 +253,7 @@ export class NeuralAnimal {
     }
     this.lieS += (this.lie - this.lieS) * (1 - Math.exp(-dt * 2.5));
     // ---- desired path (critically damped spring from the current root velocity)
-    const want = [], hl = 0.22;
+    const want = [], hl = RESPONSE.pathHalfLife; // player's path: critically damped spring toward the command
     { let px = this.pos[0], pz = this.pos[1], vx = this.rootVel[0], vz = this.rootVel[1], ax = 0, az = 0, y = this.yaw;
       const om = 2 / hl;
       for (let k = 1; k <= 60; k++) {
@@ -252,13 +262,13 @@ export class NeuralAnimal {
         vx = e * (jx + j1x * dt) + dv[0]; vz = e * (jz + j1z * dt) + dv[1]; ax = e * (ax - j1x * om * dt); az = e * (az - j1z * om * dt);
         px += vx * dt; pz += vz * dt;
         const tgtYaw = Math.hypot(vx, vz) > 0.25 ? Math.atan2(vx, vz) : (des.moving ? dyaw : y);
-        y = y + wrapA(tgtYaw - y) * (1 - Math.exp(-dt * 7));
+        y = y + wrapA(tgtYaw - y) * (1 - Math.exp(-dt * RESPONSE.yawRate));
         if (k % 10 === 0) want.push({ x: px, z: pz, yaw: y, vx, vz });
       }
     }
     // blend the network's own future with the player's path (more player toward the end)
     const futW = fut.map((o, i) => {
-      const p = this.future[i], w = want[i], b = Math.pow(o / 60, 0.6) * 0.85 + 0.1;
+      const p = this.future[i], w = want[i], b = Math.min(0.97, RESPONSE.nearWeight + (0.95 - RESPONSE.nearWeight) * Math.pow(o / 60, 0.6));
       const dx = lerp(p.dx, Math.sin(w.yaw), b), dz = lerp(p.dz, Math.cos(w.yaw), b), dn = Math.hypot(dx, dz) || 1;
       return { x: lerp(p.x, w.x, b), z: lerp(p.z, w.z, b), dx: dx / dn, dz: dz / dn, vx: lerp(p.vx, w.vx, b), vz: lerp(p.vz, w.vz, b) };
     });
@@ -424,7 +434,7 @@ export class NeuralAnimal {
     if (sp.tusks) this.tusks = [0, 1].map(() => mesh(this.capsule, mat(sp.tusks, 0.4)));
   }
   render(A, B, f, dt) {
-    if (this.model) { const W = this.Wi; for (let i = 0; i < W.length; i++) W[i] = lerp(A[i], B[i], f); if (!globalThis.SOMA_ANIMAL_REST) this.model.apply(W, this.ix, this.netRest, this.pawC); return; }
+    if (this.model) { const W = this.Wi; for (let i = 0; i < W.length; i++) W[i] = lerp(A[i], B[i], f); if (!globalThis.SOMA_ANIMAL_REST) { this.model.apply(W, this.ix, this.netRest, this.pawC); this.model.body?.update(this.pawC || this.contacts, this.speed, dt); } return; }
     const T = this.THREE, V = (x, y, z) => new T.Vector3(x, y, z), sp = this.sp;
     const J = (n) => { const i = this.ix[n] * 3; return V(lerp(A[i], B[i], f), lerp(A[i + 1], B[i + 1], f), lerp(A[i + 2], B[i + 2], f)); };
     const limb = (o, a, b, r, flat = 1) => { const d = b.clone().sub(a), len = Math.max(1e-4, d.length()); o.position.copy(a).add(b).multiplyScalar(0.5); o.quaternion.setFromUnitVectors(V(0, 1, 0), d.multiplyScalar(1 / len)); o.scale.set(r, (len + 1.4 * r) / 3, r * flat); };

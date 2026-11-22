@@ -1,0 +1,109 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Animal rig audit</title>
+<script type="importmap">{ "imports": { "three": "../../vendor/three/three.module.min.js" } }</script>
+<!-- Drives a realistic animal model with the trained network over a scripted rollout and measures the rig:
+     head pitch (model vs network), paw yaw and leg bend plane per limb (stance frames), and skin stretch
+     (triangle edge length vs rest, with the bones under the worst edges). ?species=fox -->
+<script type="module">
+import * as THREE from 'three';
+import { DogNet, NeuralAnimal } from '../../js/animalnet.js';
+import { loadAnimalModel } from '../../js/animalmesh.js';
+import { readAnimalNet } from '../../js/gguf.js';
+const q = new URLSearchParams(location.search), key = q.get('species') || 'dog';
+const BASE = new URL('../../', location.href).href;
+try {
+  const man = await fetch(BASE + 'models/models.json').then((r) => r.json()), first = `models/balanced/${man.models.balanced.parts[0].file}`;
+  const { meta, buffer: bin } = readAnimalNet(await fetch(BASE + first).then((r) => r.arrayBuffer()));
+  const model = await loadAnimalModel(THREE, key, (p) => fetch(BASE + p).then((r) => r.arrayBuffer()));
+  const scene = new THREE.Scene();
+  // skin: a fixed sample of triangle edges, rest lengths from the authored pose (before the network moves it)
+  const meshes = []; model.group.updateMatrixWorld(true);
+  model.group.traverse((o) => { if (o.isSkinnedMesh) meshes.push(o); });
+  const v = new THREE.Vector3(), edges = [];
+  let seed = 7; const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (const m of meshes) {
+    const idx = m.geometry.index, n = idx ? idx.count / 3 : m.geometry.attributes.position.count / 3, take = Math.min(n, 3000);
+    for (let t = 0; t < take; t++) { const tri = Math.floor(rnd() * n); const ids = [0, 1, 2].map((k) => (idx ? idx.getX(tri * 3 + k) : tri * 3 + k)); edges.push([m, ids[0], ids[1]], [m, ids[1], ids[2]]); }
+  }
+  const pos = (m, i) => m.getVertexPosition(i, new THREE.Vector3()).applyMatrix4(m.matrixWorld);
+  // dual-quaternion skinning (world space): each bone's skin matrix -> scale, rotation, translation; blend rotation and
+  // translation as dual quaternions (shortest arc to the first bone), scale linearly
+  const mats = new Map();
+  const skinM = (m, b) => { const key = m.id + ':' + b; let r = mats.get(key); if (r && r.f === frameNo) return r;
+    const M = m.skeleton.bones[b].matrixWorld.clone().multiply(m.skeleton.boneInverses[b]).multiply(m.bindMatrix);
+    const t = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3(); M.decompose(t, q, sc); r = { t, q, k: (sc.x + sc.y + sc.z) / 3, f: frameNo }; mats.set(key, r); return r; };
+  let frameNo = 0;
+  const posDQ = (m, i) => {
+    const si = m.geometry.attributes.skinIndex, sw = m.geometry.attributes.skinWeight, v0 = new THREE.Vector3().fromBufferAttribute(m.geometry.attributes.position, i);
+    let r0 = null, k = 0; const R = [0, 0, 0, 0], D = [0, 0, 0, 0];
+    for (let j = 0; j < 4; j++) { const w = sw.getComponent(i, j); if (w <= 0) continue; const S = skinM(m, si.getComponent(i, j)); let q = S.q;
+      if (!r0) r0 = q; let sgn = (q.x * r0.x + q.y * r0.y + q.z * r0.z + q.w * r0.w) < 0 ? -w : w;
+      // dual part: 0.5 * (t, 0) * q
+      const tx = S.t.x, ty = S.t.y, tz = S.t.z, d = [0.5 * (tx * q.w + ty * q.z - tz * q.y), 0.5 * (-tx * q.z + ty * q.w + tz * q.x), 0.5 * (tx * q.y - ty * q.x + tz * q.w), -0.5 * (tx * q.x + ty * q.y + tz * q.z)];
+      R[0] += sgn * q.x; R[1] += sgn * q.y; R[2] += sgn * q.z; R[3] += sgn * q.w; for (let c = 0; c < 4; c++) D[c] += sgn * d[c]; k += w * S.k; }
+    const n = Math.hypot(...R); for (let c = 0; c < 4; c++) { R[c] /= n; D[c] /= n; }
+    const qr = new THREE.Quaternion(R[0], R[1], R[2], R[3]);
+    // translation = 2 * D * conj(R)
+    const t = new THREE.Vector3(2 * (D[3] * -R[0] + D[0] * R[3] + D[1] * -R[2] - D[2] * -R[1]), 2 * (D[3] * -R[1] - D[0] * -R[2] + D[1] * R[3] + D[2] * -R[0]), 2 * (D[3] * -R[2] + D[0] * -R[1] - D[1] * -R[0] + D[2] * R[3]));
+    return v0.multiplyScalar(k).applyQuaternion(qr).add(t);
+  };
+  const len0dq = edges.map(([m, a, b]) => posDQ(m, a).distanceTo(posDQ(m, b)));
+  const len0 = edges.map(([m, a, b]) => pos(m, a).distanceTo(pos(m, b)));
+  const boneOf = (m, i) => { const si = m.geometry.attributes.skinIndex, sw = m.geometry.attributes.skinWeight; let best = 0, bw = -1; for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w > bw) { bw = w; best = si.getComponent(i, k); } } return m.skeleton.bones[best].name; };
+  const net = new DogNet(meta, bin), a = new NeuralAnimal(THREE, scene, key, net, model), mdl = a.model;
+  const SCRIPT = [[0, null, 'run'], [2, [0, 1], 'walk'], [6, [0, 1], 'run'], [9, [1, 0], 'run'], [11.5, [0, 1], 'sprint'], [14, null, 'run'], [16, null, 'end']];
+  const dt = 1 / 60, P = (o) => o.getWorldPosition(new THREE.Vector3()), deg = (x) => x * 57.2958;
+  const limbs = [['front', 'L', 0], ['front', 'R', 1], ['hind', 'L', 2], ['hind', 'R', 3]];
+  const stats = { headModel: [], headNet: [], paw: limbs.map(() => []), bend: limbs.map(() => []), stretch: [], stretchDQ: [], worst: {}, tw: {}, sw: {} };
+  const headDir = () => { const h = mdl.head, rq = mdl.restQ.get(h).clone().invert(), wq = h.getWorldQuaternion(new THREE.Quaternion()); return mdl.nose0.clone().sub(mdl.restP.get(h)).applyQuaternion(rq).applyQuaternion(wq).normalize(); };
+  const pitch = (d) => deg(Math.asin(Math.max(-1, Math.min(1, d.y))));
+  let t = 0, n = 0, lastSeg = -1;
+  while (true) {
+    let c = SCRIPT[0]; for (const s of SCRIPT) if (t >= s[0]) c = s;
+    if (c[2] === 'end') break;
+    const seg = SCRIPT.indexOf(c); a.update({ move: c[1] || [0, 0], gait: c[2], action: null }, dt); lastSeg = seg; t += dt; n++;
+    if (n % 10 || t < 1) continue;
+    mdl.group.updateMatrixWorld(true);
+    const W = a.Wi, V = (nm) => { const i = a.ix[nm] * 3; return new THREE.Vector3(W[i], W[i + 1], W[i + 2]); };
+    stats.headModel.push(pitch(headDir())); stats.headNet.push(pitch(V('HeadEnd').sub(V('Head')).normalize()));
+    const fwd = V('Spine1').sub(V('Hips')).setY(0).normalize(), left = new THREE.Vector3(0, 1, 0).cross(fwd).normalize();
+    for (const [kind, s, k] of limbs) {
+      const l = mdl[kind][s], bones = l.bones.filter(Boolean), end = bones[bones.length - 1];
+      if ((a.pawC || a.contacts)[k] > 0.5) { // paw direction on the ground: wrist/ankle bone -> toe tip, outward positive
+        const tip = l.tip.reduce((acc, o) => acc.add(P(o)), new THREE.Vector3()).multiplyScalar(1 / l.tip.length), d = tip.sub(P(end)).setY(0); if (d.lengthSq() > 1e-8) { d.normalize(); stats.paw[k].push(deg(Math.atan2(d.dot(left) * (s === 'L' ? 1 : -1), d.dot(fwd)))); }
+      }
+      const chainPts = [...(kind === 'front' ? bones.slice(-3) : bones.slice(0, 3)).map(P), P(l.tip[0])], [A, K, C] = chainPts, u = K.clone().sub(A), w = C.clone().sub(K), nrm = u.clone().cross(w);
+      if (nrm.length() > 0.25 * u.length() * w.length()) stats.bend[k].push(deg(Math.acos(Math.min(1, Math.abs(nrm.normalize().dot(left))))));
+    }
+    for (const o of mdl.driven) { // twist about the bone's own axis and swing of the axis, relative to its bind pose
+      const r = mdl.restLocal.get(o); if (!r || o === mdl.root) continue;
+      const ch = mdl.driven.find((c) => c.parent === o) || o.children.find((c) => c.isBone); if (!ch) continue;
+      const axis = (mdl.restLocal.get(ch)?.p || ch.position).clone().normalize(); if (axis.lengthSq() < 0.5) continue;
+      const D = r.q.clone().invert().multiply(o.quaternion), ax = axis.clone().applyQuaternion(r.q.clone().invert().multiply(r.q)); // axis in the bone's bind frame
+      const pr = new THREE.Vector3(D.x, D.y, D.z).dot(axis), tw = new THREE.Quaternion(axis.x * pr, axis.y * pr, axis.z * pr, D.w).normalize();
+      const twist = deg(2 * Math.acos(Math.min(1, Math.abs(tw.w)))), swing = deg(axis.angleTo(axis.clone().applyQuaternion(D)));
+      (stats.tw[o.name] ||= []).push(twist); (stats.sw[o.name] ||= []).push(swing); void ax;
+    }
+    if (n % 60 === 0) { // skin stretch
+      const r = edges.map(([m, i, j], e) => { const l1 = pos(m, i).distanceTo(pos(m, j)); return len0[e] > 1e-6 ? Math.abs(Math.log(Math.max(1e-6, l1) / len0[e])) : 0; });
+      const srt = r.slice().sort((x, y) => x - y); stats.stretch.push([srt[Math.floor(srt.length * 0.99)], srt[srt.length - 1]]);
+      frameNo++; const rq = edges.map(([m, i, j], e) => { const l1 = posDQ(m, i).distanceTo(posDQ(m, j)); return len0dq[e] > 1e-6 ? Math.abs(Math.log(Math.max(1e-6, l1) / len0dq[e])) : 0; }).sort((x, y) => x - y);
+      stats.stretchDQ.push([rq[Math.floor(rq.length * 0.99)], rq[rq.length - 1]]);
+      const cut = srt[Math.floor(srt.length * 0.995)];
+      r.forEach((x, e) => { if (x >= cut && x > 0.15) { const [m, i] = edges[e], b = boneOf(m, i); stats.worst[b] = (stats.worst[b] || 0) + 1; } });
+    }
+  }
+  const med = (x) => { const s = x.slice().sort((p, q2) => p - q2); return s.length ? +s[s.length >> 1].toFixed(1) : null; };
+  const p90 = (x) => { const s = x.slice().sort((p, q2) => p - q2); return s.length ? +s[Math.floor(s.length * 0.9)].toFixed(1) : null; };
+  window.RESULT = { species: key, headPitch: { model: med(stats.headModel), net: med(stats.headNet), modelMin: +Math.min(...stats.headModel).toFixed(0) },
+    pawOutward: Object.fromEntries(limbs.map(([kd, s, k]) => [kd + s, med(stats.paw[k])])),
+    bendOffPlaneP90: Object.fromEntries(limbs.map(([kd, s, k]) => [kd + s, p90(stats.bend[k])])),
+    stretch: { p99: +(Math.max(...stats.stretch.map((x) => x[0]))).toFixed(3), max: +(Math.max(...stats.stretch.map((x) => x[1]))).toFixed(2) },
+    stretchDQ: { p99: +(Math.max(...stats.stretchDQ.map((x) => x[0]))).toFixed(3), max: +(Math.max(...stats.stretchDQ.map((x) => x[1]))).toFixed(2) },
+    followers: mdl.followers.map((f) => `${f.b.name}->${f.to.name}`),
+    worstBones: Object.entries(stats.worst).sort((x, y) => y[1] - x[1]).slice(0, 5),
+    twistP95: Object.entries(stats.tw).map(([k, v]) => [k, p90(v.map((x) => x))]).sort((x, y) => y[1] - x[1]).slice(0, 6),
+    swingP95: Object.entries(stats.sw).map(([k, v]) => [k, p90(v)]).sort((x, y) => y[1] - x[1]).slice(0, 6) };
+} catch (e) { window.RESULT = { error: String(e && e.stack || e) }; }
+</script>

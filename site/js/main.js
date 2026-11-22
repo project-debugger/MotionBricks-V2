@@ -415,6 +415,7 @@ async function main() {
     if (animal) {
       if (window.SOMA_HIDE_LANDMARKS) for (const b of R.landmarks) b.visible = false; // debug captures
       const ta = performance.now();
+      if (animal.model?.body) animal.model.body.enabled = S.bodyFX !== false;
       if (!window.SOMA_FREEZE) animal.update(command(dt), dt);
       PERF.animal += performance.now() - ta;
       const t = animal.target, k = 1 - Math.exp(-dt * 6), sc = Math.min(3.6, Math.max(0.28, animal.size / 0.85));

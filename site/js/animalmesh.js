@@ -10,6 +10,8 @@ import { GLTFLoader } from '../vendor/three/addons/loaders/GLTFLoader.js';
 
 const K = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 const DOG_HIP = 0.469, DOG_HIND = 0.448; // network rest: Hips height, hind leg chain (UpLeg..FootEnd)
+const PAW_FLEX = 100 * Math.PI / 180, HIND_PLANT = 0.5; // lifted paws flex at most 100 deg; planted hind feet half-flat (the heel lifts)
+const TWIST_MAX = 12 * Math.PI / 180, HEAD_ROLL_MAX = 10 * Math.PI / 180;
 
 // rig: bone names as written in the GLB (matched case- and punctuation-insensitively)
 //   root    bone that receives the world translation (topmost driven bone; may be the pelvis itself)
@@ -156,6 +158,115 @@ export async function loadAnimalModel(THREE, key, fetchBuffer) {
   return new AnimalModel(THREE, gltf, cfg);
 }
 
+// Put the skeleton in its bind pose: the pose the skin was made in, where the mesh is undeformed. The node pose stored
+// in a file is whatever frame the author exported (a lying fox, a galloping horse, mid-stride cats); rest directions,
+// twists and toe angles measured on it were wrong, which bent paws sideways and twisted the skin. Each joint's bind
+// rotation relative to its parent joint comes from the inverse bind matrices (IBM_parent * IBM_joint^-1), which does
+// not depend on the files' unit and axis conventions; joint offsets keep their stored lengths. Returns the number of
+// joints changed.
+export function toBindPose(T, root, only = null) {
+  root.updateMatrixWorld(true);
+  const ibm = new Map();
+  root.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.bones.forEach((b, i) => { if (!ibm.has(b)) ibm.set(b, o.skeleton.boneInverses[i]); }); });
+  const depth = (o) => { let d = 0; for (let p = o.parent; p; p = p.parent) d++; return d; };
+  const p = new T.Vector3(), q = new T.Quaternion(), s = new T.Vector3(); let n = 0;
+  for (const b of [...ibm.keys()].sort((x, y) => depth(x) - depth(y))) {
+    if (!ibm.has(b.parent) || (only && !only.has(b))) continue; // top joint keeps its placement; unlisted bones their authored pose
+    ibm.get(b.parent).clone().multiply(ibm.get(b).clone().invert()).decompose(p, q, s);
+    if (b.quaternion.angleTo(q) > 1e-4) n++;
+    b.quaternion.copy(q);
+  }
+  root.updateMatrixWorld(true);
+  return n;
+}
+// Rotate a model so its body stands upright and faces +Z: spine (pelvis -> neck) forward, legs (hip -> toe tip) down.
+function standUpright(T, scene, group, pelvis, neck, legs) {
+  group.updateMatrixWorld(true);
+  const P = (o) => o.getWorldPosition(new T.Vector3());
+  const down = legs.reduce((acc, [a, tip]) => acc.add(P(tip).sub(P(a)).normalize()), new T.Vector3()).normalize();
+  const fwd = P(neck).sub(P(pelvis)); fwd.addScaledVector(down, -fwd.dot(down)).normalize();
+  const M = new T.Matrix4().makeBasis(new T.Vector3().crossVectors(down.clone().negate(), fwd), down.clone().negate(), fwd);
+  const R = new T.Quaternion().setFromRotationMatrix(M).invert();
+  scene.quaternion.premultiply(R); scene.position.applyQuaternion(R); group.updateMatrixWorld(true);
+}
+
+// Muscles, breathing and soft tissue for the skinned animals: every skin bone gets a displacement along the surface
+// normal (metres) in a small per-bone float texture, read in the vertex shader before skinning. Driven per frame from
+// the gait: loaded legs bulge (more when the joint below is flexed), the chest breathes (faster and deeper when
+// running, panting at a sprint) and the belly rides the body's vertical bounce on a spring.
+class AnimalBodyFX {
+  constructor(T, scene, model) {
+    this.T = T; this.m = model; this.enabled = true; this.phase = 0; this.effort = 0; this.jig = 0; this.jigV = 0; this.prevY = null; this.prevVy = 0;
+    const cat = new Map(), put = (o, c) => { if (o && !cat.has(o)) cat.set(o, c); };
+    for (const l of [model.front.L, model.front.R]) { put(l.bones[0], 'shoulder'); put(l.bones[1], 'upper'); put(l.bones[2], 'lower'); }
+    for (const l of [model.hind.L, model.hind.R]) { put(l.bones[0], 'upper'); put(l.bones[1], 'lower'); }
+    model.spine.forEach((o, i) => put(o, model.spineU[i] > 0.5 ? 'chest' : 'belly'));
+    put(model.neck[0], 'chest'); put(model.pelvis, 'belly');
+    this.cat = cat; this.limbs = [['front', 'L', 0], ['front', 'R', 1], ['hind', 'L', 2], ['hind', 'R', 3]];
+    this.meshes = [];
+    scene.traverse((o) => {
+      if (!o.isSkinnedMesh || !o.material) return;
+      // a bone belongs to the nearest driven bone at or above it; only categorised driven bones (legs, chest, belly) move
+      const drivenSet = new Set(model.driven), bones = o.skeleton.bones;
+      const owner = bones.map((b) => { for (let x = b; x; x = x.parent) if (drivenSet.has(x)) return cat.has(x) ? x : null; return null; });
+      const data = new Float32Array(bones.length * 4), tex = new T.DataTexture(data, bones.length, 1, T.RGBAFormat, T.FloatType);
+      tex.needsUpdate = true;
+      const pv = model.pelvis, bi = bones.indexOf(pv) >= 0 ? bones.indexOf(pv) : 0;
+      const k = new T.Vector3().setFromMatrixScale(bones[bi].matrixWorld.clone().multiply(o.skeleton.boneInverses[bi]).multiply(o.bindMatrix)).x;
+      const uni = { uMuscleTex: { value: tex }, uMuscleUnit: { value: 1 / Math.max(1e-9, k) } };
+      for (const mat of [].concat(o.material)) {
+        mat.onBeforeCompile = (sh) => {
+          Object.assign(sh.uniforms, uni);
+          sh.vertexShader = 'uniform sampler2D uMuscleTex;\nuniform float uMuscleUnit;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+          #ifdef USE_SKINNING
+          { float d = skinWeight.x * texelFetch(uMuscleTex, ivec2(int(skinIndex.x), 0), 0).r + skinWeight.y * texelFetch(uMuscleTex, ivec2(int(skinIndex.y), 0), 0).r
+                    + skinWeight.z * texelFetch(uMuscleTex, ivec2(int(skinIndex.z), 0), 0).r + skinWeight.w * texelFetch(uMuscleTex, ivec2(int(skinIndex.w), 0), 0).r;
+            transformed += normal * d * uMuscleUnit; }
+          #endif`);
+        };
+        mat.customProgramCacheKey = () => 'animal-body-fx';
+        mat.needsUpdate = true;
+      }
+      this.meshes.push({ data, tex, owner });
+    });
+  }
+  // contacts: paw contact weights (front L/R, hind L/R); speed in m/s
+  update(contacts, speed, dt) {
+    if (!(dt > 0)) return;
+    const T = this.T, m = this.m, h = m.hips, val = new Map();
+    if (this.enabled) {
+      const effT = Math.min(1, speed / (4.5 * h + 0.5));
+      this.effort += (effT - this.effort) * (1 - Math.exp(-dt / 0.6));
+      const E = this.effort, rate = 0.35 + 1.9 * E * E; // breaths per second: 0.35 resting, ~2.2 panting
+      this.phase = (this.phase + dt * rate * 2 * Math.PI) % (2 * Math.PI);
+      const breath = (0.005 + 0.012 * E) * h * (0.5 - 0.5 * Math.cos(this.phase));
+      // belly: spring driven by the pelvis' vertical acceleration (lags and overshoots the bounce)
+      const y = m.pelvis.getWorldPosition(new T.Vector3()).y;
+      if (this.prevY !== null) {
+        const vy = (y - this.prevY) / dt, ay = Math.max(-60, Math.min(60, (vy - this.prevVy) / dt)); this.prevVy = vy;
+        const w = 2 * Math.PI * 3.2, z = 0.35; // 3.2 Hz, lightly damped
+        this.jigV += (-w * w * this.jig - 2 * z * w * this.jigV - ay) * dt; this.jig += this.jigV * dt;
+        this.jig = Math.max(-0.03 * h, Math.min(0.03 * h, this.jig));
+      }
+      this.prevY = y;
+      for (const [o, c] of this.cat) if (c === 'chest') val.set(o, breath); else if (c === 'belly') val.set(o, 0.6 * breath - 0.5 * this.jig);
+      for (const [kind, s, k] of this.limbs) {
+        const l = m[kind][s], b = l.bones.filter(Boolean), load = contacts ? Math.max(0, Math.min(1, (contacts[k] - 0.2) / 0.5)) : 0;
+        const u = kind === 'front' ? b[b.length - 3] || b[0] : b[0], lo = kind === 'front' ? b[b.length - 2] : b[1], end = kind === 'front' ? b[b.length - 1] : b[2];
+        let flex = 0;
+        if (u && lo && end) { const P = (o) => o.getWorldPosition(new T.Vector3()); flex = Math.min(1, P(lo).sub(P(u)).angleTo(P(end).sub(P(lo))) / 1.6); }
+        const bulge = h * (0.004 + 0.008 * load * (0.4 + 0.6 * flex) + 0.003 * E);
+        if (u) val.set(u, bulge); if (lo) val.set(lo, 0.45 * bulge); if (kind === 'front' && l.bones[0]) val.set(l.bones[0], 0.6 * bulge);
+      }
+    }
+    for (const me of this.meshes) {
+      let changed = false;
+      me.owner.forEach((o, i) => { const v = o ? val.get(o) || 0 : 0; if (me.data[i * 4] !== v) { me.data[i * 4] = v; changed = true; } });
+      if (changed) me.tex.needsUpdate = true;
+    }
+  }
+}
+
 export class AnimalModel {
   constructor(THREE, gltf, cfg) {
     const T = THREE; this.T = T; this.cfg = cfg; this.group = new T.Group(); this.group.add(gltf.scene);
@@ -166,6 +277,15 @@ export class AnimalModel {
     this.noseB = r.nose ? [].concat(r.nose).map(B) : []; this.tail = (r.tail || []).map(B);
     const limb = ([bones, tip]) => ({ bones: bones.map(B), tip: [].concat(tip).map(B) });
     this.front = { L: limb(r.front.L), R: limb(r.front.R) }; this.hind = { L: limb(r.hind.L), R: limb(r.hind.R) };
+    // reference pose: the skin's bind pose, standing upright (see toBindPose)
+    // the driven chains, their ancestors and the toes down to the tips go to the bind pose; faces, ears and manes keep
+    // the authored expression (some bind poses have the mouth wide open)
+    const chainSet = new Set(), up = (o) => { for (let x = o; x && x !== gltf.scene; x = x.parent) chainSet.add(x); };
+    [this.root, this.pelvis, ...this.spine, ...this.neck, this.head, ...this.tail].forEach((o) => o && up(o));
+    for (const l of [this.front.L, this.front.R, this.hind.L, this.hind.R]) { l.bones.forEach((o) => o && up(o)); l.tip.forEach(up); }
+    this.bindJoints = cfg.filePose ? 0 : toBindPose(T, gltf.scene, chainSet);
+    const legRoots = [this.front.L, this.front.R, this.hind.L, this.hind.R].map((l) => [l.bones.find(Boolean), l.tip[0]]);
+    if (!cfg.filePose) standUpright(T, gltf.scene, this.group, this.pelvis, this.neck[0], legRoots);
     gltf.scene.traverse((o) => { if (o.isMesh) { o.frustumCulled = false; o.castShadow = true; } });
     // scale: the model's hind leg is as long, relative to its hips height, as the dog's
     this.group.updateMatrixWorld(true);
@@ -183,6 +303,19 @@ export class AnimalModel {
     this.restQ = new Map(this.driven.map((o) => [o, o.getWorldQuaternion(new T.Quaternion())]));
     this.restP = new Map(this.driven.map((o) => [o, P(o)]));
     this.restLocal = new Map(this.driven.map((o) => [o, { p: o.position.clone(), q: o.quaternion.clone() }]));
+    // helper bones placed on a driven joint but parented elsewhere (e.g. the horse's hip bone hangs off the second spine
+    // bone while it sits on the pelvis): they follow the joint they sit on, else the skin there tears when the back bends
+    const skinned = new Set(); gltf.scene.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.bones.forEach((b) => skinned.add(b)); });
+    const tol = 0.02 * cfg.hips; this.followers = [];
+    for (const b of skinned) {
+      if (this.restP.has(b)) continue;
+      const pb = P(b); let best = null, bd = Infinity;
+      for (const d of this.driven) { const dd = this.restP.get(d).distanceTo(pb); if (dd < bd) { bd = dd; best = d; } }
+      if (best && bd < tol && best !== b.parent && !this.driven.some((d) => this.isAncestor(b, d))) { // never a bone above a driven one
+        const off = this.restQ.get(best).clone().invert().multiply(b.getWorldQuaternion(new T.Quaternion()));
+        this.followers.push({ b, to: best, off });
+      }
+    }
     for (const l of [this.front.L, this.front.R, this.hind.L, this.hind.R]) {
       l.tip0 = tipP(l); const e = l.bones[l.bones.length - 1]; l.metaLen = e ? l.tip0.distanceTo(this.restP.get(e)) : 0;
       // toe bone between the paw bone and the tip: kept at its standing angle while the paw is planted
@@ -212,6 +345,7 @@ export class AnimalModel {
     const tipY = Math.min(...[this.front.L, this.front.R, this.hind.L, this.hind.R].map((l) => l.tip0.y));
     this.pawR = Math.max(0, Math.min(0.06 * cfg.hips, tipY - (Number.isFinite(lowest) ? lowest : tipY)));
     this.tmp = { q: new T.Quaternion(), q2: new T.Quaternion(), m: new T.Matrix4(), m2: new T.Matrix4(), v: new T.Vector3(), v2: new T.Vector3() };
+    this.body = new AnimalBodyFX(T, gltf.scene, this);
   }
   // leg chain lengths (metres) from the shoulder / hip joint to the toe tip, averaged over both sides; the network's
   // legs are scaled uniformly to these, so its paws are within reach of the model's legs
@@ -225,6 +359,7 @@ export class AnimalModel {
     const F0 = f(a0, l0, new T.Matrix4()), F1 = f(a1, l1, new T.Matrix4());
     return out.setFromRotationMatrix(F1.multiply(F0.transpose()));
   }
+  isAncestor(a, b) { for (let x = b.parent; x; x = x.parent) if (x === a) return true; return false; }
   setWorldQ(o, q) { const pq = this.tmp.q2; o.parent.getWorldQuaternion(pq); o.quaternion.copy(pq.invert().multiply(q)); o.updateWorldMatrix(false, false); }
   // W: network joint positions (world, model proportions), ix: name -> index, rest: { pelvis frame and tail direction at rest }
   apply(W, ix, rest, contacts) {
@@ -274,27 +409,38 @@ export class AnimalModel {
     }
     // world rotations (parents first), then the root's translation so that the pelvis lands on the network's hips
     for (const o of this.driven) { const q = R.get(o); if (q) this.setWorldQ(o, q.clone().multiply(this.restQ.get(o))); }
+    this.limitTwist(this.head, HEAD_ROLL_MAX, null, this.nose0.clone().sub(this.restP.get(this.head)));
     const hipNet = V('LeftUpLeg').add(V('RightUpLeg')).multiplyScalar(0.5), hipModel = this.hind.L.bones[0].getWorldPosition(new T.Vector3()).add(this.hind.R.bones[0].getWorldPosition(new T.Vector3())).multiplyScalar(0.5);
     const rootTo = this.root.getWorldPosition(new T.Vector3()).add(hipNet.sub(hipModel));
     this.root.position.copy(this.root.parent.worldToLocal(rootTo)); this.root.updateMatrixWorld(true);
-    // two-bone IK: wrist / ankle exactly on the network's, then the paw bone aims at the toe tip
+    // Paws: a planted paw stands flat in its bind orientation, turned to the body's heading; a lifted paw flexes as the
+    // network's does (wrist -> toe tip direction), at most PAW_FLEX from flat and without twist. The two-bone IK then
+    // puts the wrist / ankle where that paw reaches the network's toe tip. (Aiming the paw bone at the tip with a
+    // minimal rotation bent paws 80-140 deg and twisted them 20-60 deg, because rigs and network split paws differently.)
+    const yawOf = (Rq) => { const f = new T.Vector3(0, 0, 1).applyQuaternion(Rq); return new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 1, 0), Math.atan2(f.x, f.z)); };
+    const yawF = yawOf(Rc), yawH = yawOf(Rp);
     for (const [kind, s, S] of limbs) {
       const l = this[kind][s], b = kind === 'front' ? l.bones.slice(1) : l.bones, [u, m, e] = b;
       const tipT = V(kind === 'front' ? `${S}HandEnd` : `${S}FootEnd`), wristN = V(kind === 'front' ? `${S}Hand` : `${S}Foot`);
-      // lower-leg direction: the network's, pulled toward the model's own standing direction for stiff-legged species
-      const metaDir = tipT.clone().sub(wristN).normalize(), stiff = this.cfg.style?.metaStiff || 0;
-      if (e && stiff > 0) { const down = new T.Vector3(0, -1, 0).applyQuaternion(kind === 'front' ? Rc : Rp); metaDir.lerp(down, stiff).normalize(); } // standing cannon: along the body's down axis
-      const target = e ? tipT.clone().addScaledVector(metaDir, -l.metaLen) : tipT;
+      const c = contacts ? contacts[limbs.findIndex((x) => x[0] === kind && x[1] === s)] : 0, w = Math.max(0, Math.min(1, (c - 0.3) / 0.4));
+      let target = tipT, Qpaw = null;
+      if (e) {
+        const metaDir = tipT.clone().sub(wristN).normalize(), stiff = this.cfg.style?.metaStiff || 0;
+        if (stiff > 0) { const down = new T.Vector3(0, -1, 0).applyQuaternion(kind === 'front' ? Rc : Rp); metaDir.lerp(down, stiff).normalize(); } // standing cannon: along the body's down axis
+        const restQ = this.restQ.get(e), restOff = l.tip0.clone().sub(this.restP.get(e)), yq = kind === 'front' ? yawF : yawH;
+        const Qplant = yq.clone().multiply(restQ);
+        const Qswing = new T.Quaternion().setFromUnitVectors(restOff.clone().applyQuaternion(yq).normalize(), metaDir).multiply(Qplant);
+        const ang = Qplant.angleTo(Qswing); if (ang > PAW_FLEX) Qswing.copy(Qplant.clone().slerp(Qswing, PAW_FLEX / ang));
+        Qpaw = Qswing.clone().slerp(Qplant, w * (kind === 'front' ? 1 : HIND_PLANT));
+        target = tipT.clone().sub(restOff.clone().applyQuaternion(restQ.clone().invert()).applyQuaternion(Qpaw));
+      }
       const A = u.getWorldPosition(new T.Vector3()), Kn = m.getWorldPosition(new T.Vector3());
       const C = e ? e.getWorldPosition(new T.Vector3()) : this.tipNow(l, m);
       this.twoBone(u, m, A, Kn, C, target);
-      if (e) {
-        const tip = tipT, E = e.getWorldPosition(new T.Vector3()), cur = this.tipNow(l, e).sub(E);
-        const q = new T.Quaternion().setFromUnitVectors(cur.normalize(), tip.sub(E).normalize()), wq = e.getWorldQuaternion(new T.Quaternion());
-        this.setWorldQ(e, q.multiply(wq));
-      }
+      if (Qpaw) this.setWorldQ(e, Qpaw);
+      // no candy-wrapper: limb bones twist at most TWIST_MAX about their own axis (children keep their world rotation)
+      this.limitTwist(u, TWIST_MAX, m); this.limitTwist(m, TWIST_MAX, e || null);
       // planted paw: toes back at their standing angle (the paw presses flat instead of pivoting as one block)
-      const c = contacts ? contacts[limbs.findIndex((x) => x[0] === kind && x[1] === s)] : 0, w = Math.max(0, Math.min(1, (c - 0.3) / 0.4));
       if (l.toe && w > 0) {
         const t = l.toe, tq = t.getWorldQuaternion(new T.Quaternion()), tp = t.getWorldPosition(new T.Vector3());
         const cur = l.tip0.clone().sub(l.toeP0).applyQuaternion(l.toeQ0.clone().invert()).applyQuaternion(tq).normalize();
@@ -304,6 +450,33 @@ export class AnimalModel {
         this.setWorldQ(t, new T.Quaternion().setFromUnitVectors(cur, dir).multiply(tq)); void tp;
       }
     }
+    this.applyFollowers();
+  }
+  // helpers that sit on a driven joint: same world rotation change as that joint, kept on its position
+  applyFollowers() {
+    const T = this.T;
+    for (const f of this.followers) {
+      const q = f.to.getWorldQuaternion(new T.Quaternion()).multiply(f.off);
+      this.setWorldQ(f.b, q);
+      const pw = f.to.getWorldPosition(new T.Vector3()); f.b.position.copy(f.b.parent.worldToLocal(pw)); f.b.updateWorldMatrix(false, true);
+    }
+  }
+  // clamp a bone's twist about its own axis (toward its child, or restAxisWorld) relative to the reference pose; the
+  // given (IK-placed) child keeps its world rotation, every other child follows
+  limitTwist(o, max, child = null, restAxisWorld = null) {
+    const T = this.T, r = this.restLocal.get(o); if (!r) return;
+    let axis;
+    if (restAxisWorld) axis = restAxisWorld.clone().applyQuaternion(this.restQ.get(o).clone().invert()).normalize(); // into the bone's rest frame
+    else { const ch = child && child.parent === o ? child : o.children.find((x) => this.restLocal.has(x)) || o.children.find((x) => x.isBone); if (!ch) return;
+      axis = (this.restLocal.get(ch)?.p || ch.position).clone().applyQuaternion(r.q.clone().invert().multiply(r.q)).normalize(); }
+    if (!(axis.lengthSq() > 0.5)) return;
+    const D = r.q.clone().invert().multiply(o.quaternion), pr = D.x * axis.x + D.y * axis.y + D.z * axis.z;
+    const tw = new T.Quaternion(axis.x * pr, axis.y * pr, axis.z * pr, D.w).normalize(); if (tw.w < 0) tw.set(-tw.x, -tw.y, -tw.z, -tw.w);
+    const ang = 2 * Math.acos(Math.min(1, tw.w)); if (ang <= max) return;
+    const swing = D.clone().multiply(tw.clone().invert()), keep = tw.clone().slerp(new T.Quaternion(), 1 - max / ang);
+    const kids = child && child.parent === o ? [[child, child.getWorldQuaternion(new T.Quaternion())]] : []; // only the IK-placed child stays put; helper and face bones follow
+    o.quaternion.copy(r.q.clone().multiply(swing).multiply(keep)); o.updateWorldMatrix(false, false);
+    for (const [x, q] of kids) this.setWorldQ(x, q);
   }
   // current toe tip, carried rigidly by bone o from its rest pose
   tipNow(l, o) {

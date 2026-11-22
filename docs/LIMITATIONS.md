@@ -87,6 +87,11 @@
 - The SOMA network was not retrained or fine-tuned (no training code or training data was released);
   "trained here" applies to the animal network only. The human and animal networks are not fused into
   one computation: they never run together, so fusing would not lower CPU use.
+- Animal skin still stretches where a dog's range of motion exceeds what a model was skinned for (horse and
+  rabbit hips, cat and fox shoulders at a gallop; up to ~2x on the 1 % worst mesh edges). The models' own skin
+  weights are used as authored; no muscles are simulated, the muscle layer is a displacement driven by gait.
+  The elephant's front legs can cross briefly when it pivots in place. Faster steering of the animal network
+  adds 10-25 % paw sliding while moving for some species.
 - Fighting moves: the key poses are hand-built by IK, the motion into and out of them is SOMA; the
   model was not trained on fighting, so strikes are less crisp than captured martial arts.
 - Target windows come from 4,737 mocap frames (with mirrored copies); straight running near
