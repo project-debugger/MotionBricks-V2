@@ -2,7 +2,7 @@
 """Stage the claude.ai artifact copy of the playground (Light model only) into a directory.
 
 claude.ai artifacts take standard web media types only and at most 15 MB per binary file, so every
-.bin and .glb file (model parts, motion targets, meshes, animal models) is copied byte-for-byte under a
+.bin and .glb file (model parts, motion targets, meshes) is copied byte-for-byte under a
 .wasm name; the page's <meta name="soma-bin-ext"> tells main.js, and models.json lists the renamed parts.
 
     python3 site/build/make_index.py && python3 site/build/stage_artifact.py OUT_DIR [--models light]

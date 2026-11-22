@@ -372,7 +372,7 @@ export class Controller {
     this.events = []; // e.g. {type:'sit', pos, yaw, seat}
   }
   get frame() { return this.time * FPS; }
-  // move the whole motion (e.g. when switching back from an animal at another place)
+  // move the whole motion (e.g. to put the character back at a given spot)
   teleport(dx, dz) {
     if (Math.abs(dx) + Math.abs(dz) < 1e-6) return;
     this.buffer = this.buffer.map((f) => { const o = new Float64Array(f); o[0] += dx; o[2] += dz; return o; });

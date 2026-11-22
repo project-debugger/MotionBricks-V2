@@ -34,7 +34,6 @@
   .btn.big { background: rgba(240, 116, 58, 0.9); color: var(--accent-ink); }
   .btn.on { background: var(--accent); color: var(--accent-ink); }
   body.desktop #joy, body.desktop #pad { display: none; }
-  body.animal #hud .nn { display: none; }
   #keys { position: fixed; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%);
     display: none; flex-wrap: wrap; justify-content: center; gap: 6px 14px; max-width: calc(100% - 32px); color: var(--ink); }
   body.desktop #keys { display: flex; }
@@ -70,7 +69,6 @@
   #track { height: 8px; background: rgba(255, 255, 255, 0.12); border-radius: 99px; overflow: hidden; }
   #bar { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
   #status { font: 500 12px/1.45 var(--mono); color: var(--ink); }
-  #go-animal { border: 1px solid var(--line); background: transparent; color: var(--ink); font: 600 14px var(--ui); border-radius: 12px; padding: 10px; cursor: pointer; }
   #go { border: 0; background: var(--accent); color: var(--accent-ink); font: 700 15px var(--ui); border-radius: 12px; padding: 12px; cursor: pointer; }
   @media (prefers-reduced-motion: reduce) { #bar { transition: none; } }
 </style>
@@ -117,7 +115,6 @@
     <div id="track"><div id="bar"></div></div>
     <div id="status">Loading...</div>
     <button id="go">Download and play</button>
-    <button id="go-animal" class="alt">Play an animal (no download)</button>
   </div>
 </div>
 <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js" } }</script>

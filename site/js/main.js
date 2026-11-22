@@ -8,10 +8,6 @@ import { ClipLibrary, legIndices } from './library.js';
 import { TransitionBank } from './bank.js';
 import { BodyFX } from './body.js';
 import { registerFightActions } from './fight.js';
-import { Animal, SPECIES } from './animals.js';
-import { DogNet, NeuralAnimal } from './animalnet.js';
-import { readAnimalNet } from './gguf.js';
-import { ANIMAL_MODELS, loadAnimalModel } from './animalmesh.js';
 import { PRESETS, DEFAULTS } from './settings.js';
 
 const $ = (s) => document.querySelector(s);
@@ -225,15 +221,10 @@ const TOGGLES = [['footLocking', 'Foot locking (IK)'], ['anatomical', 'Anatomica
   ['instant', 'Instant response (pre-generated SOMA transitions)'], ['bodyFX', 'Muscles, breathing and soft tissue'],
   ['autoQuality', 'Adapt resolution and shadows to this device (keeps the frame rate up on phones and old PCs)']];
 let WALK_STYLES = [];
-function buildPanel(models, onModel, onCharacter, onWalkStyle) {
+function buildPanel(models, onModel, onWalkStyle) {
   const p = $('#panel-body');
-  const crow = [['human', 'Human', 'SOMA network'], ...Object.keys(ANIMAL_MODELS).map((k) => [k, ANIMAL_MODELS[k].name, 'trained network'])].map(([k, n, sub]) => `<button class="seg" data-char="${k}">${n}<small>${sub}</small></button>`).join('');
   const mrow = Object.entries(models).map(([k, m]) => `<button class="seg" data-model="${k}" ${m.available ? '' : 'disabled'}>${m.short}<small>${(m.bytes / 1e6).toFixed(0)} MB</small></button>`).join('');
-  p.innerHTML = `<h3>Character</h3><div class="segs" id="chars">${crow}</div>
-    <p class="note" style="margin-top:6px">Animals are realistic 3D models moved by a neural network trained here on 41 minutes of dog motion capture (MANN dog data, CC BY-NC 4.0); every species uses that dog motion on its own body. The SOMA network only knows human motion.</p>
-    <details class="note"><summary>Animal model credits</summary><ul style="margin:4px 0 0;padding-left:18px">${Object.values(ANIMAL_MODELS).map((m) => `<li>${m.name}: <a href="${m.credit.url}" target="_blank" rel="noopener">${m.credit.title}</a> by ${m.credit.author} (${m.credit.license}), animations removed, textures resized</li>`).join('')}</ul></details>
-    <label class="tg"><input id="t-procAnimals" type="checkbox"><span>Use the old procedural animal animation instead</span></label>
-    <h3>Walk style</h3><div class="segs" id="walkstyles"><button class="seg" data-walkstyle="natural">Natural<small>default</small></button>${WALK_STYLES.map((w) => `<button class="seg" data-walkstyle="${w.key}">${w.label}<small>${w.pace.toFixed(2)} m/s</small></button>`).join('')}</div>
+  p.innerHTML = `<h3>Walk style</h3><div class="segs" id="walkstyles"><button class="seg" data-walkstyle="natural">Natural<small>default</small></button>${WALK_STYLES.map((w) => `<button class="seg" data-walkstyle="${w.key}">${w.label}<small>${w.pace.toFixed(2)} m/s</small></button>`).join('')}</div>
     <p class="note" style="margin-top:6px" id="walkstyle-note">Real walking motion capture (100STYLE, CC BY 4.0) used as targets for the SOMA network; a style walks at its own pace. Running is unchanged.</p>
     <h3>Model</h3><div class="segs" id="models">${mrow}</div>
     <h3>Preset</h3><div class="segs" id="presets">${Object.keys(PRESETS).map((k) => `<button class="seg" data-preset="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
@@ -243,29 +234,25 @@ function buildPanel(models, onModel, onCharacter, onWalkStyle) {
     <button class="reset" id="reset">Reset to defaults</button>`;
   const sync = () => {
     p.querySelectorAll('[data-model]').forEach((b) => b.classList.toggle('on', b.dataset.model === S.model));
-    p.querySelectorAll('[data-char]').forEach((b) => b.classList.toggle('on', b.dataset.char === (S.character || 'human')));
     p.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b.dataset.preset === S.preset));
     p.querySelectorAll('[data-walkstyle]').forEach((b) => b.classList.toggle('on', b.dataset.walkstyle === (S.walkStyle || 'natural')));
     for (const [k] of SLIDERS) { const el = $(`#s-${k}`); el.value = S[k]; $(`#v-${k}`).textContent = `${(+S[k]).toFixed(el.step < 1 ? 2 : 0)} ${el.dataset.unit}`; }
     for (const [k] of TOGGLES) $(`#t-${k}`).checked = !!S[k];
     $('#t-dur').checked = S.durationMode === 'model';
-    $('#t-procAnimals').checked = S.animalMotion === 'procedural';
   };
   p.addEventListener('input', (e) => {
     const id = e.target.id;
     if (id.startsWith('s-')) { S[id.slice(2)] = +e.target.value; S.preset = 'custom'; }
-    else if (id.startsWith('t-') && id !== 't-dur' && id !== 't-procAnimals') S[id.slice(2)] = e.target.checked;
+    else if (id.startsWith('t-') && id !== 't-dur') S[id.slice(2)] = e.target.checked;
     else if (id === 't-dur') S.durationMode = e.target.checked ? 'model' : 'horizon';
-    else if (id === 't-procAnimals') { S.animalMotion = e.target.checked ? 'procedural' : 'network'; if (onCharacter && S.character !== 'human') onCharacter(S.character); }
     save(); sync();
   });
   p.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.preset) { Object.assign(S, PRESETS[b.dataset.preset]); S.preset = b.dataset.preset; }
     if (b.dataset.model && b.dataset.model !== S.model) { S.model = b.dataset.model; onModel(S.model); }
-    if (b.dataset.char) onCharacter(b.dataset.char);
     if (b.dataset.walkstyle) { S.walkStyle = b.dataset.walkstyle; if (onWalkStyle) onWalkStyle(S.walkStyle); }
-    if (b.id === 'reset') S = { ...DEFAULTS, model: S.model, character: S.character };
+    if (b.id === 'reset') S = { ...DEFAULTS, model: S.model };
     save(); sync();
   });
   sync();
@@ -278,12 +265,6 @@ async function main() {
   const [skel, lim, wmeta, wbin, mmeta, mbin, models, cmeta, cbin, bmeta, bbin] = await Promise.all([getJSON('data/skeleton.json'), getJSON('data/joint_limits.json'),
     getJSON('data/windows.json'), getBin('data/windows.bin'), getJSON('data/soma_mesh.json'), getBin('data/soma_mesh.bin'), getJSON('models/models.json'),
     getJSON('data/clips.json'), getBin('data/clips.bin'), getJSON('data/bank.json'), getBin('data/bank.bin')]);
-  let dogNet = null;
-  // the animal network is shard 1 of the single GGUF model file (models/<model>/motionbricks-00001-of-000NN.gguf)
-  try {
-    const mk = models.models.balanced ? 'balanced' : Object.keys(models.models)[0], first = models.models[mk].parts[0].file;
-    const { meta, buffer } = readAnimalNet(await getGlb(`models/${mk}/${first}`)); dogNet = new DogNet(meta, buffer);
-  } catch (e) { console.warn('animal network unavailable', e); }
   const sk = { names: skel.names, parents: skel.parents, reference: Float64Array.from(skel.reference.flat()) };
   const lib = new Library(sk, wmeta, wbin), limits = bindLimits(lim, sk);
   const fightPoses = registerFightActions(sk, lib, wmeta.actions, limits);
@@ -338,7 +319,7 @@ async function main() {
   };
   const loadModel = (key) => {
     ready = false; $('#loading').hidden = false; $('#bar').style.width = '0%';
-    $('#start').hidden = true; $('#go').hidden = true; $('#go-animal').hidden = true;
+    $('#start').hidden = true; $('#go').hidden = true;
     worker.postMessage({ type: 'load', base: BASE + 'models/', model: key, info: models.models[key], skeleton: sk, jointLimits: lim,
       threads: Math.min(4, navigator.hardwareConcurrency || 2) });
   };
@@ -347,42 +328,7 @@ async function main() {
     worker.postMessage({ type: 'generate', id, ...req });
   });
   const ctrl = new Controller({ sk, lib, clips, bank, limits, settings: () => S, generate, actions: wmeta.actions });
-  // characters: the SOMA human, or a procedural animal standing where the current character is
-  const animals = {}; let animal = null, modelRequested = false;
-  const focus = () => (animal ? [...animal.worldXZ(), animal.yaw] : (() => { const w = M.fk(ctrl.display || ctrl.buffer[3], sk.parents); return [w[0], w[2], ctrl.simYaw]; })());
-  const animalModels = {}; let charToken = 0;
-  const setCharacter = async (key) => {
-    const token = ++charToken;
-    const neural = key !== 'human' && S.animalMotion !== 'procedural' && dogNet;
-    let model = null;
-    if (neural && ANIMAL_MODELS[key]) { // realistic skinned model, fetched on first use
-      if (!(key in animalModels)) {
-        $('#hud-model').textContent = `Loading ${ANIMAL_MODELS[key].name}...`;
-        animalModels[key] = await loadAnimalModel(THREE, key, getGlb).catch((e) => { console.warn('animal model unavailable', key, e); return null; });
-      }
-      if (token !== charToken) return; // another character was picked meanwhile
-      model = animalModels[key];
-    }
-    const [fx, fz, fyaw] = focus();
-    S.character = key; save();
-    if (animal) animal.setVisible(false);
-    if (key === 'human') {
-      animal = null; R.body.visible = true;
-      const w = M.fk(ctrl.display || ctrl.buffer[3], sk.parents); ctrl.teleport(fx - w[0], fz - w[2]);
-      $('#hud-model').textContent = ready ? MODELS[S.model].label : 'SOMA network';
-      if (!ready && !modelRequested) { $('#loading').hidden = false; $('#start').hidden = false; $('#go').hidden = false; }
-    } else {
-      R.body.visible = false; R.chair.visible = false;
-      const ck = `${key}:${neural ? 'net' : 'proc'}`;
-      animal = animals[ck] || (animals[ck] = neural ? new NeuralAnimal(THREE, R.scene, key, dogNet, model) : new Animal(THREE, R.scene, key));
-      animal.teleport(fx, fz, fyaw); animal.setVisible(true);
-      input.sitting = false; $('#b-sit').classList.remove('on');
-      $('#hud-model').textContent = `${ANIMAL_MODELS[key]?.name || SPECIES[key].name} - ${animal instanceof NeuralAnimal ? (animal.model ? 'trained network, realistic model' : 'trained network (dog mocap)') : 'procedural'}`;
-      $('#loading').hidden = true;
-    }
-    document.body.classList.toggle('animal', !!animal);
-  };
-  buildPanel(MODELS, (k) => { modelRequested = true; loadModel(k); }, setCharacter, loadWalkStyle);
+  buildPanel(MODELS, (k) => loadModel(k), loadWalkStyle);
 
   // start screen: pick a model, then download
   const startRow = $('#start-models');
@@ -390,10 +336,7 @@ async function main() {
   startRow.addEventListener('click', (e) => { const b = e.target.closest('[data-start]'); if (!b) return; S.model = b.dataset.start; save(); startRow.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); });
   $('#start').hidden = false;
   status(`The real SOMA network runs on this device. First download: about ${(models.models[S.model].bytes / 1e6).toFixed(0)} MB.`);
-  $('#go').addEventListener('click', () => { modelRequested = true; loadModel(S.model); });
-  const savedAnimal = () => (S.character && S.character !== 'human' && ANIMAL_MODELS[S.character] ? S.character : 'dog');
-  $('#go-animal').addEventListener('click', () => { $('#panel').hidden = false; setCharacter(savedAnimal()); });
-  if (S.character && S.character !== 'human') setCharacter(savedAnimal());
+  $('#go').addEventListener('click', () => loadModel(S.model));
 
   $('#gear').addEventListener('click', () => { $('#panel').hidden = !$('#panel').hidden; });
   $('#close').addEventListener('click', () => { $('#panel').hidden = true; });
@@ -401,7 +344,7 @@ async function main() {
 
   // per-frame cost counters (main thread) and generation cost (worker); read by the performance governor and tests
   const governor = new QualityGovernor(R, R.basePixelRatio);
-  const PERF = window.SOMA_PERF = { frames: 0, frameMs: 0, update: 0, post: 0, render: 0, net: 0, gens: 0, animal: 0 };
+  const PERF = window.SOMA_PERF = { frames: 0, frameMs: 0, update: 0, post: 0, render: 0, net: 0, gens: 0 };
   // loop
   const camT = new THREE.Vector3(0, 0.95, 0); let last = performance.now(), fpsAcc = 0, fpsN = 0;
   const ray = new THREE.Raycaster(), tmp = new THREE.Vector3();
@@ -410,29 +353,8 @@ async function main() {
     if (window.SOMA_MANUAL && !frame.stepping) { last = now; requestAnimationFrame(frame); return; }
     const realDt = (now - last) / 1000;
     const dt = frame.stepping ? frame.stepping : Math.min(0.1, Math.max(0, realDt)); last = now; // stays real-time down to 10 fps
-    if (!frame.stepping && (ready || animal)) governor.update(realDt, S.autoQuality !== false);
+    if (!frame.stepping && ready) governor.update(realDt, S.autoQuality !== false);
     let pose;
-    if (animal) {
-      if (window.SOMA_HIDE_LANDMARKS) for (const b of R.landmarks) b.visible = false; // debug captures
-      const ta = performance.now();
-      if (animal.model?.body) animal.model.body.enabled = S.bodyFX !== false;
-      if (!window.SOMA_FREEZE) animal.update(command(dt), dt);
-      PERF.animal += performance.now() - ta;
-      const t = animal.target, k = 1 - Math.exp(-dt * 6), sc = Math.min(3.6, Math.max(0.28, animal.size / 0.85));
-      camT.x += (t.x - camT.x) * k; camT.z += (t.z - camT.z) * k;
-      const d = input.camDist * sc;
-      R.camera.position.set(camT.x + Math.sin(input.camYaw) * d, t.y + 0.35 * sc + d * 0.12, camT.z + Math.cos(input.camYaw) * d);
-      R.camera.lookAt(camT.x, t.y * 0.85, camT.z);
-      R.sun.position.set(t.x + 3.5 * sc, 7.5 * sc, t.z + 2.5 * sc); R.sun.target.position.set(t.x, 0, t.z);
-      R.sun.shadow.camera.left = R.sun.shadow.camera.bottom = -4 * sc; R.sun.shadow.camera.right = R.sun.shadow.camera.top = 4 * sc; R.sun.shadow.camera.updateProjectionMatrix();
-      const tr = performance.now(); R.renderer.render(R.scene, R.camera); PERF.render += performance.now() - tr; PERF.frames++; PERF.frameMs += dt * 1000;
-      fpsAcc += dt; fpsN++;
-      if (fpsAcc > 0.5) { $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps${governor.level ? ' · lite ' + governor.level : ''}`; $('#hud-speed').textContent = `${animal.speed.toFixed(1)} m/s`; fpsAcc = 0; fpsN = 0; }
-      window.SOMA_STATE = { ready, animal: animal.key, speed: animal.speed, pos: [animal.pos.x, animal.pos.z], action: animal.action ? animal.action.name : null, mode: animal.mode };
-      if (!frame.stepping) requestAnimationFrame(frame);
-      return;
-    }
-    if (R.sun.shadow.camera.left !== -4) { R.sun.shadow.camera.left = R.sun.shadow.camera.bottom = -4; R.sun.shadow.camera.right = R.sun.shadow.camera.top = 4; R.sun.shadow.camera.updateProjectionMatrix(); }
     const tu = performance.now();
     if (ready && !window.SOMA_FREEZE) pose = ctrl.update(command(dt), dt);
     else if (ready) pose = ctrl.display;
@@ -478,6 +400,6 @@ async function main() {
   }
   requestAnimationFrame(frame);
   const step = (dt = 1 / 30) => { frame.stepping = dt; try { frame(performance.now()); } finally { frame.stepping = 0; } };
-  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, setCharacter, clips, sk, M, loadWalkStyle, step, R, governor, get animal() { return animal; } };
+  window.SOMA_DEBUG = { input, ctrl, S, loadModel, bodyFX, fightPoses, clips, sk, M, loadWalkStyle, step, R, governor };
 }
 main().catch((e) => { $('#status').textContent = `Error: ${e.message}`; console.error(e); });

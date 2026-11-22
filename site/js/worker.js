@@ -26,7 +26,7 @@ async function load({ base, model, info, skeleton, jointLimits, threads }) {
   ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, threads) : 1;
   let all, off = 0, done = 0;
   const t0 = performance.now();
-  if (info.format === 'gguf') { // one split GGUF: shard 1 = metadata (+ animal net), the rest rebuilt into the ONNX file shard by shard
+  if (info.format === 'gguf') { // one split GGUF: shard 1 carries the metadata; all shards are rebuilt into the ONNX file shard by shard
     let asm = null;
     for (const p of info.parts) {
       const b = await fetchPart(`${base}${model}/${p.file}`, (n) => { done += n; postMessage({ type: 'progress', done, total: info.bytes }); });

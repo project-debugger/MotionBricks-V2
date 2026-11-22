@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Pack the playground's networks into ONE GGUF model, split into shards like llama.cpp's gguf-split.
+"""Pack the playground's SOMA model into ONE GGUF model, split into shards like llama.cpp's gguf-split.
 
-    .venv/bin/python tools/gguf/build_gguf.py [--animal-dir DIR]   # -> site/models/balanced/motionbricks-000NN-of-000MM.gguf
+    .venv/bin/python tools/gguf/build_gguf.py   # -> site/models/balanced/motionbricks-000NN-of-000MM.gguf
 
---animal-dir: a train_mann.py output (dognet.json + dognet.bin); default: the animal network already in shard 1.
-
-Contents (every shard is a valid GGUF file with the split.no / split.count / split.tensors.count keys):
-  * the animal motion network (float16 tensors "animal.*" + metadata "mann-quadruped.meta_json"), alone in shard 1
-    (1.6 MB), so the animal mode downloads that shard only;
-  * the SOMA human model (onnxruntime graph):
+Contents (every shard is a valid GGUF file with the split.no / split.count / split.tensors.count keys; shard 1 also
+holds the metadata): the SOMA human model as an onnxruntime graph:
       - the dynamic-INT8 weights of the matrix multiplies (MatMulInteger, 136 M weights) re-coded with ggml's Q5_0
         blocks (5.5 bits per weight); at load they are decoded back onto the INT8 grid, so the runtime graph, speed and
         memory are those of the INT8 model. Eval set: MPJPE 7.07 cm vs 7.10 cm for the INT8 file (Q4_0: 7.27 cm);
@@ -47,44 +43,7 @@ def kv(key, typ, val):
     return out + {T_STR: lambda: gstr(val), T_U16: lambda: struct.pack("<H", val), T_I32: lambda: struct.pack("<i", val), T_U32: lambda: struct.pack("<I", val)}[typ]()
 
 
-def read_gguf(path: Path):
-    """Minimal reader for the animal network: shard 1 of an earlier build, or a file from tools/animal/to_gguf.py."""
-    b = path.read_bytes(); p = 4 + 4
-    u32 = lambda: struct.unpack_from("<I", b, p)[0]
-    nT, nKV = struct.unpack_from("<QQ", b, p); p += 16
-    def s():
-        nonlocal p; n = struct.unpack_from("<Q", b, p)[0]; p += 8; v = b[p:p + n].decode(); p += n; return v
-    kvs = {}
-    for _ in range(nKV):
-        k = s(); t = struct.unpack_from("<I", b, p)[0]; p += 4
-        if t == T_STR: kvs[k] = s()
-        elif t in (T_U32, T_I32): kvs[k] = struct.unpack_from("<I" if t == T_U32 else "<i", b, p)[0]; p += 4
-        elif t == T_U16: kvs[k] = struct.unpack_from("<H", b, p)[0]; p += 2
-        else: raise ValueError(t)
-    infos = []
-    for _ in range(nT):
-        name = s(); nd = struct.unpack_from("<I", b, p)[0]; p += 4
-        dims = list(struct.unpack_from(f"<{nd}Q", b, p)); p += 8 * nd
-        typ, off = struct.unpack_from("<IQ", b, p); p += 12
-        infos.append((name, dims, typ, off))
-    data = (p + ALIGN - 1) // ALIGN * ALIGN
-    tens = [(n.removeprefix("animal."), d, t, b[data + o: data + o + 2 * int(np.prod(d))]) for n, d, t, o in infos if t == GGML_F16]
-    return kvs, tens
-
-
-def animal_from_dir(d: Path):
-    """train_mann.py output -> (metadata kvs, float16 tensors)."""
-    meta = json.loads((d / "dognet.json").read_text()); blob = (d / "dognet.bin").read_bytes(); tensors = meta.pop("tensors")
-    tens = [(t["name"], list(reversed(t["shape"])), GGML_F16, blob[t["offset"]:t["offset"] + 2 * int(np.prod(t["shape"]))]) for t in tensors]
-    return {"mann-quadruped.meta_json": json.dumps(meta, separators=(",", ":")), "mann-quadruped.expert_count": meta["experts"], "mann-quadruped.hidden_size": meta["hidden"]}, tens
-
-
-def main(animal_dir=None):
-    if animal_dir: ak, atens = animal_from_dir(Path(animal_dir))
-    else:
-        first = sorted(OUT.glob("motionbricks-00001-of-*.gguf"))
-        if not first: raise SystemExit("no animal network: pass --animal-dir (train_mann.py output)")
-        ak, atens = read_gguf(first[0])
+def main():
     onnx_bytes = SRC.read_bytes()
     model = onnx.load_from_string(onnx_bytes)
     B = {n.input[1] for n in model.graph.node if n.op_type == "MatMulInteger"}
@@ -104,7 +63,7 @@ def main(animal_dir=None):
     parts.append(onnx_bytes[pos:])
     graph = b"".join(parts)
     # tensors: (name, ggml dims, type, bytes)
-    tensors = [("animal." + n, d, t, raw) for n, d, t, raw in atens]
+    tensors = []
     CH = 12 * 1024 * 1024
     for k in range(0, len(graph), CH):
         tensors.append((f"soma.graph.{k // CH:03d}", [len(graph[k:k + CH])], GGML_I8, graph[k:k + CH]))
@@ -114,7 +73,7 @@ def main(animal_dir=None):
     shards, cur, size = [], [], 0
     for t in tensors:
         n = len(t[3]) + ALIGN
-        if cur and (size + n > SHARD - 512 * 1024 or (cur[-1][0].startswith("animal.") and not t[0].startswith("animal."))):  # shard 1: animal net only
+        if cur and size + n > SHARD - 512 * 1024:
             shards.append(cur); cur, size = [], 0
         cur.append(t); size += n
     shards.append(cur)
@@ -125,11 +84,9 @@ def main(animal_dir=None):
     for si, sh in enumerate(shards):
         kvs = [kv("split.no", T_U16, si), kv("split.count", T_U16, len(shards)), kv("split.tensors.count", T_I32, len(tensors)), kv("general.alignment", T_U32, ALIGN)]
         if si == 0:
-            kvs += [kv("general.architecture", T_STR, "motionbricks"), kv("general.name", T_STR, "MotionBricks playground: SOMA human + animal motion networks"),
-                    kv("general.license", T_STR, "SOMA weights: NVIDIA Open Model License; animal network: CC BY-NC 4.0 (derived from MANN dog data)"),
-                    kv("soma.format", T_STR, "onnx graph + ggml Q5_0 MatMulInteger weights"), kv("soma.splice_json", T_STR, json.dumps(meta, separators=(",", ":"))),
-                    kv("mann-quadruped.meta_json", T_STR, ak["mann-quadruped.meta_json"]), kv("mann-quadruped.expert_count", T_U32, ak["mann-quadruped.expert_count"]),
-                    kv("mann-quadruped.hidden_size", T_U32, ak["mann-quadruped.hidden_size"])]
+            kvs += [kv("general.architecture", T_STR, "motionbricks"), kv("general.name", T_STR, "MotionBricks V2 playground: SOMA human motion model"),
+                    kv("general.license", T_STR, "NVIDIA Open Model License (MotionBricks SOMA weights, quantized)"),
+                    kv("soma.format", T_STR, "onnx graph + ggml Q5_0 MatMulInteger weights"), kv("soma.splice_json", T_STR, json.dumps(meta, separators=(",", ":")))]
         infos, datas, off = [], [], 0
         for name, dims, typ, raw in sh:
             pad = -off % ALIGN; datas.append(b"\0" * pad); off += pad
@@ -149,8 +106,8 @@ def main(animal_dir=None):
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser(); ap.add_argument("--animal-dir"); a = ap.parse_args()
-    files, total, sha = main(a.animal_dir)
+    argparse.ArgumentParser(description=__doc__.split("\n")[0]).parse_args()
+    files, total, sha = main()
     man = ROOT / "site/models/models.json"; m = json.loads(man.read_text())
     b = m["models"]["balanced"]
     b.update({"format": "gguf", "parts": files, "bytes": total, "sha256": sha, "label": "Balanced - INT8 pose transformer (Q5_0 storage)"})

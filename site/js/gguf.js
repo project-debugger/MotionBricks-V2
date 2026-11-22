@@ -1,6 +1,6 @@
-// GGUF (v2/v3) reading for the playground's single model file (tools/gguf/build_gguf.py): a split GGUF whose
-// shard 1 holds the animal network and the metadata, and whose other shards hold the SOMA human model as an ONNX
-// graph with its INT8 matrix weights stored as ggml Q5_0 blocks.
+// GGUF (v2/v3) reading for the playground's single model file (tools/gguf/build_gguf.py): a split GGUF holding the
+// SOMA human model as an ONNX graph with its INT8 matrix weights stored as ggml Q5_0 blocks; shard 1 also holds the
+// metadata (soma.splice_json) that says how to put the ONNX file back together.
 
 const SIZE = { 0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8 };
 
@@ -31,14 +31,6 @@ export function parseGGUF(buf) {
   return { kv, tensors, buf };
 }
 
-// the animal network: float16 tensors (optionally prefixed "animal.") + JSON metadata, in DogNet's layout
-export function readAnimalNet(buf) {
-  const g = parseGGUF(buf), meta = JSON.parse(g.kv['mann-quadruped.meta_json']);
-  meta.tensors = g.tensors.filter((t) => t.type === 1 && (t.name.startsWith('animal.') || !t.name.includes('.') || /^(gate|W|B|[xyg]_)/.test(t.name)))
-    .map((t) => ({ name: t.name.replace(/^animal\./, ''), shape: t.dims.slice().reverse(), offset: t.offset }));
-  return { meta, buffer: buf };
-}
-export const readGGUF = readAnimalNet; // older name
 
 // ggml Q5_0 block (32 weights: f16 scale, 32 high bits, 16 bytes of low nibbles) -> int8, rounded onto the int8 grid
 const F16 = new Float32Array(65536);
