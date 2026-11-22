@@ -11,9 +11,9 @@ import style100 as S  # noqa: E402
 from somart import math3d as m3  # noqa: E402
 
 RAW = S.CACHE / "raw" / "Neutral_FW.bvh"
-MESH = ROOT / "showcase/build/cache/soma_mesh.json"
+MESH = ROOT / "site/data/soma_mesh.json"
 needs_data = pytest.mark.skipif(not (RAW.exists() and MESH.exists()),
-                                reason="run tools/mocap/style100.py fetch (and the showcase mesh export) first")
+                                reason="run tools/mocap/style100.py fetch first")
 
 
 def test_quat_between():

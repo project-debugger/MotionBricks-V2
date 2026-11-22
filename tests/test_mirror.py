@@ -10,7 +10,7 @@ from somart.skeleton import load_bvh
 
 ROOT = Path(__file__).resolve().parents[1]
 CLIP = ROOT / "third_party/motionbricks/assets/motions/soma/locomotion/bs_1d_linear/run_loop_180_R_003__A326.bvh"
-MESH = ROOT / "showcase/build/cache/soma_mesh.json"
+MESH = ROOT / "site/data/soma_mesh.json"
 
 
 @pytest.fixture(scope="module")

@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
-"""Learn anatomical joint limits (axes, ranges, relaxed finger pose) from the eval mocap.
+"""Fit anatomical joint limits (axes, ranges, relaxed hand pose) on the freely licensed clips.
 
-Writes configs/skeletons/soma_joint_limits.json (aggregate statistics only, no motion).
-Requires datasets/build_eval_set.py to have been run.
+Writes configs/skeletons/soma_joint_limits.json and site/data/joint_limits.json (aggregate statistics only, no
+motion). Needs the retargeted 100STYLE and CMU clips (see tools/export_web_data.py, which also runs this).
 """
-import json
 import sys
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "runtime"))
-from somart.anatomy import JointLimits  # noqa: E402
-from somart.skeleton import Skeleton  # noqa: E402
+sys.path.insert(0, str(ROOT / "tools"))
+import export_web_data as E  # noqa: E402
 
-d = np.load(ROOT / "datasets/soma_eval/eval_requests.npz")
-sk = Skeleton.from_dict(json.loads((ROOT / "datasets/soma_eval/skeleton.json").read_text()))
-gt = np.concatenate([d["gt"][i, :d["lengths"][i]] for i in range(len(d["lengths"]))]).astype(float)
-lim = JointLimits.fit(gt, sk)
-lim.save(ROOT / "configs/skeletons/soma_joint_limits.json")
-print(f"{len(lim.limits)} constrained joints, {len(lim.relaxed)} relaxed joints from {len(gt)} mocap frames")
+if __name__ == "__main__":
+    sk, _ = E.style100.soma_skeleton()
+    lib, _ = E.load_free(sk)
+    E.fit_limits(lib, sk)

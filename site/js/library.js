@@ -64,8 +64,8 @@ export class ClipLibrary {
         for (let u = 1; u < ups.length; u++) if (ups[u - 1] <= f && f < ups[u]) { period = ups[u] - ups[u - 1]; phase = (f - ups[u - 1]) / period; }
         if (period !== null && (period < 12 || period > maxPeriod)) { phase = null; period = null; }
         // gait from the stride period: walking strides take 31-52 frames, jogs and runs 15-29 (any speed)
-        const run = period === null ? null : period < runPeriod;
-        this.cand.push({ ci, f, v, yr, h: st[f].h, speed: Math.hypot(v[0], v[1]), phase, period, run, cat: c.category, crouch: st[f].h < 0.75, g: st[f].g, yaw, style });
+        const run = c.gait === 'run' ? true : period === null ? null : period < runPeriod; // jog/run clips are tagged
+        this.cand.push({ ci, f, v, yr, h: st[f].h, speed: Math.hypot(v[0], v[1]), phase, period, run, cat: c.category, crouch: c.crouch ?? st[f].h < 0.75, g: st[f].g, yaw, style });
       }
     }
   }

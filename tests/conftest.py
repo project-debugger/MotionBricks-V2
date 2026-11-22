@@ -15,7 +15,7 @@ EVAL = ROOT / "datasets/soma_eval/eval_requests.npz"
 CLIPS = ROOT / "third_party/motionbricks/assets/motions/soma"
 
 needs_model = pytest.mark.skipif(not FP32.exists(), reason="run tools/export_onnx.sh first")
-needs_eval = pytest.mark.skipif(not EVAL.exists(), reason="run datasets/build_eval_set.py first")
+needs_eval = pytest.mark.skipif(not EVAL.exists(), reason="needs the upstream SOMA evaluation set (NVIDIA sample data, not included)")
 needs_clips = pytest.mark.skipif(not CLIPS.exists(), reason="run tools/fetch_upstream.py first")
 
 

@@ -14,7 +14,7 @@ frames. We build a SOMA T-pose by swinging each mapped bone of the bind pose ont
 direction (top-down, so twist comes from the bind pose; feet and toes only in heading, so a flat foot stays
 flat), then copy each 100STYLE joint's world rotation onto it. Joints with no counterpart (second neck joint, jaw, eyes, fingers, ends) keep their calibrated local
 rotation. The pelvis is placed so SOMA's hip sockets follow the performer's, scaled by leg length, and the
-clip is shifted vertically so its stance feet sit at the same height as in the NVIDIA sample clips.
+clip is shifted vertically so its stance feet sit at the SOMA rig's standing height (STANCE_HEIGHT).
 
 The downloaded files are untrusted input: they are only parsed as numbers (BVH) and CSV text.
 """
@@ -39,9 +39,10 @@ URL = "https://zenodo.org/records/8127870/files/100STYLE.zip?download=1"
 CACHE = ROOT / "data/external/100style"
 LICENSE = ("100STYLE dataset by Ian Mason, Sebastian Starke and Taku Komura (CC BY 4.0, "
            "https://doi.org/10.5281/zenodo.8127870), retargeted onto the SOMA rig")
-# style -> locomotion kinds used. FW forward walk, FR forward run (a slow jog here), ID idle,
-# TR1 transitions (starts, stops, speed changes)
-STYLES = {"Neutral": ["FW", "FR", "ID", "TR1"]}
+# style -> locomotion kinds used. FW/BW/SW forward/backward/sideways walk, FR/BR/SR the same as a slow jog (100STYLE's
+# capture volume is small: runs stay under 2 m/s; faster running comes from CMU, tools/mocap/cmu.py), ID idle,
+# TR1 transitions (starts, stops, speed changes). (100STYLE's "Crouched" is a stoop, pelvis 0.95 m: crouching is CMU's.)
+STYLES = {"Neutral": ["FW", "BW", "SW", "FR", "BR", "SR", "ID", "TR1"]}
 # optional walk styles (Settings > Walk style), each loaded by the page only when chosen: forward walk,
 # idle and transitions (starts and stops) in that style. Label shown in the game -> 100STYLE style name.
 # Left out after looking at them on SOMA: Elated (an exaggerated crouched bounce), hands-in-pockets and other
@@ -49,7 +50,8 @@ STYLES = {"Neutral": ["FW", "FR", "ID", "TR1"]}
 WALK_STYLES = {"Proud": "Proud", "Strutting": "Strutting", "Rushed": "Rushed", "Sad": "Depressed",
                "Elderly": "Old", "Hands behind back": "ArmsBehindBack"}
 STYLE_KINDS = ["FW", "ID", "TR1"]
-CATEGORY = {"FW": "100style_walk", "FR": "100style_jog", "ID": "100style_idle", "TR1": "100style_transitions"}
+CATEGORY = {"FW": "100style_walk", "BW": "100style_walk", "SW": "100style_walk", "FR": "100style_jog",
+            "BR": "100style_jog", "SR": "100style_jog", "ID": "100style_idle", "TR1": "100style_transitions"}
 
 # SOMA joint -> (100STYLE joint, SOMA joint the bone points to, 100STYLE joint or rest vector it points to)
 MAP = {
@@ -156,8 +158,8 @@ def quat_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def soma_bind() -> tuple[np.ndarray, np.ndarray]:
     """SOMA mesh bind pose: world rotations [J, 4] and positions [J, 3]."""
     from somart.mirror import Mirror
-    meta = json.loads((ROOT / "showcase/build/cache/soma_mesh.json").read_text())
-    raw = (ROOT / "showcase/build/cache/soma_mesh.bin").read_bytes()
+    meta = json.loads((ROOT / "site/data/soma_mesh.json").read_text())
+    raw = (ROOT / "site/data/soma_mesh.bin").read_bytes()
     ib = meta["inverseBind"]
     mats = np.frombuffer(raw, np.float32, count=ib["length"], offset=ib["offset"]).reshape(-1, 16)
     pos = np.array([np.linalg.inv(m.reshape(4, 4).T.astype(np.float64))[:3, 3] for m in mats])
@@ -165,8 +167,15 @@ def soma_bind() -> tuple[np.ndarray, np.ndarray]:
 
 
 class Style100Retargeter:
+    """Copies the source's joint world rotations onto a calibrated SOMA T-pose. Works for any source rig whose rest
+    pose has identity joint rotations (BVH-style): subclasses set MAP, FLAT, HIPS and LEG for their joint names."""
+    MAP, FLAT = MAP, FLAT
+    HIPS = ("LeftHip", "RightHip")             # source hip joints (sockets)
+    LEG = ("LeftHip", "LeftKnee", "LeftAnkle")  # source hip, knee, ankle: leg-length scale
+
     def __init__(self, sk: Skeleton, src: Skeleton) -> None:
         self.sk, self.src = sk, src
+        MAP, FLAT = self.MAP, self.FLAT
         bq, bp = soma_bind()
         sw = src.fk(src.reference)
         self.map = {sk.index(d): src.index(s) for d, (s, _, _) in MAP.items()}
@@ -193,8 +202,8 @@ class Style100Retargeter:
         ll, rl = sk.index("LeftLeg"), sk.index("RightLeg")
         self.socket = 0.5 * (sk.reference[ll, :3] + sk.reference[rl, :3])
         leg = lambda s, a, b, c: np.linalg.norm(s.reference[s.index(b), :3]) + np.linalg.norm(s.reference[s.index(c), :3])  # noqa: E731
-        self.scale = leg(sk, "LeftLeg", "LeftShin", "LeftFoot") / leg(src, "LeftHip", "LeftKnee", "LeftAnkle")
-        self.src_hips = (src.index("LeftHip"), src.index("RightHip"))
+        self.scale = leg(sk, "LeftLeg", "LeftShin", "LeftFoot") / leg(src, *self.LEG)
+        self.src_hips = (src.index(self.HIPS[0]), src.index(self.HIPS[1]))
 
     def __call__(self, src_local: np.ndarray) -> np.ndarray:
         sk, F = self.sk, src_local.shape[0]
@@ -227,14 +236,14 @@ def stance_height(sk: Skeleton, local: np.ndarray) -> float:
     return float(np.percentile(lo, 10))
 
 
+# Height of the lowest foot joint above the floor while standing on that foot, for the SOMA rig (metres). Measured
+# once as the median over the upstream SOMA walk clips; retargeted clips are shifted so their stance feet match it.
+STANCE_HEIGHT = 0.0150
+
+
 def soma_skeleton() -> tuple[Skeleton, float]:
-    """SOMA skeleton (from the NVIDIA sample clips) and the stance foot height of their walk clips."""
-    from somart.clips import ClipLibrary
-    from somart.config import Config
-    cfg = Config.load("balanced")
-    lib = ClipLibrary(ROOT / cfg.get("clips.root")).load("locomotion/bs_1d_linear/*.bvh")
-    hs = [stance_height(lib.skeleton, c.local) for c in lib.clips.values()]
-    return lib.skeleton, float(np.median(hs))
+    """SOMA skeleton (site/data/skeleton.json: the 77-joint rig the model and the page use) and the stance foot height."""
+    return Skeleton.from_dict(json.loads((ROOT / "site/data/skeleton.json").read_text())), STANCE_HEIGHT
 
 
 def retarget_all(styles: dict[str, list[str]] = STYLES, raw: Path = CACHE / "raw", out: Path = CACHE / "soma") -> list[Path]:
@@ -269,7 +278,7 @@ def load_retargeted(out: Path = CACHE / "soma") -> list[dict]:
 
 # ------------------------------------------------------------------------------------------- check
 def check(raw: Path = CACHE / "raw") -> None:
-    """Retarget quality: bone-direction agreement, foot height and stance sliding vs the NVIDIA clips."""
+    """Retarget quality: bone-direction agreement and stance sliding, source vs retargeted."""
     sk, target_h = soma_skeleton()
     src = load_bvh(raw / "Neutral_FW.bvh", drop_static_root=None).resample(30.0)
     rt = Style100Retargeter(sk, src.skeleton)

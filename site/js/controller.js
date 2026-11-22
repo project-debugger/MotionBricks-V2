@@ -64,7 +64,7 @@ export class Library {
     const cost = this.loco.map((i) => {
       const m = this.meta.windows[i];
       let c = (m.v[0] - vLocal[0]) ** 2 + (m.v[1] - vLocal[1]) ** 2 + 0.15 * (m.yr - yawRate) ** 2;
-      if ((m.h < 0.75) !== crouch) c += 1e3;
+      if ((m.crouch ?? m.h < 0.75) !== crouch) c += 1e3; // crouch clips are tagged (a crouch walk's pelvis is ~0.85 m)
       best = Math.min(best, c);
       return c;
     });

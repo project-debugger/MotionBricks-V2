@@ -148,7 +148,7 @@ try {
   window.RESULT = { meta: { fps: 30, joints: JOINT_NAMES, model: modelKey, entries,
     layout: 'per entry: float32 root[F,3], int16 quat[F,Jm,4] (/32767), uint8 contacts[F,4] (/255); other joints: relaxed pose',
     note: 'Every frame is output of the SOMA network (same pipeline as the live playground); contexts are 4-frame mocap windows; locomotion entries are chains of 6-token segments (12 frames kept each), planned within human acceleration',
-    license: 'Model output conditioned on NVIDIA MotionBricks sample clips (NVIDIA Sample Data Evaluation License)' },
+    license: 'SOMA model output (NVIDIA Open Model License) conditioned on retargeted 100STYLE (CC BY 4.0) and CMU (free use) motion capture' },
     b64: btoa(bin), seconds: (performance.now() - t0) / 1000 };
 } catch (e) { window.RESULT = { error: String(e && e.stack || e) }; }
 </script>

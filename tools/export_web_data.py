@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Export the data the browser runtime needs into site/data/.
+"""Export the motion data the browser playground needs into site/data/, from freely licensed motion capture only.
 
-  skeleton.json        77-joint SOMA rig (names, parents, reference local transforms)
+Sources (both retargeted onto the SOMA rig; fetch and retarget them first):
+  100STYLE (CC BY 4.0)   walking forward/backward/sideways, slow jogs, idle, starts and stops, walk styles
+                         python3 -I tools/mocap/style100.py fetch && python3 -I tools/mocap/style100.py retarget
+  CMU mocap (free use)   running (2-4.5 m/s) with turns and stops, crouch walking, jump, sit, duck, side step
+                         python3 -I tools/mocap/cmu.py fetch && python3 -I tools/mocap/cmu.py retarget
+
+Writes:
   windows.bin/.json    canonical 4-frame target windows for locomotion matching + action key poses
                        (root position float32, quaternions int16-normalised: 2.5 KB per window)
-  clips.bin/.json      continuous 30 fps locomotion/idle clips + mirrored copies (phase-aware targets)
-  joint_limits.json    learned anatomical limits (copy of configs/skeletons/soma_joint_limits.json)
-  soma_mesh.bin/.json  NVIDIA SOMA body mesh for skinning (from showcase/build/extract_mesh.py)
-  config.json          defaults + presets for the web controller (from configs/)
+  clips.bin/.json      continuous 30 fps locomotion/idle clips (phase-aware targets)
+  styles/*.bin/.json   optional 100STYLE walk styles, loaded by the page when chosen
+  joint_limits.json    anatomical limits fitted on the same clips (tools/fit_joint_limits.py)
 
-NOTE: the windows are derived from the upstream sample clips (NVIDIA Sample Data Evaluation
-License, internal evaluation/testing). Keep the site private unless you have the right to publish it.
+Unchanged inputs kept in site/data: skeleton.json (the SOMA rig) and soma_mesh.bin/.json (NVIDIA SOMA body mesh,
+CC BY 4.0, from showcase-era tools/extract_mesh.py). The SOMA network weights are not touched here.
 """
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 from pathlib import Path
 
@@ -23,88 +27,165 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "runtime"))
+sys.path.insert(0, str(ROOT / "tools/mocap"))
 from somart import contract as C  # noqa: E402
+from somart import math3d as m3  # noqa: E402
 from somart.anatomy import JointLimits  # noqa: E402
-from somart.clips import ClipLibrary  # noqa: E402
-from somart.config import Config  # noqa: E402
+from somart.clips import ClipLibrary, canonicalize  # noqa: E402
+from somart.skeleton import Clip  # noqa: E402
+import cmu  # noqa: E402
+import style100  # noqa: E402
 
 OUT = ROOT / "site/data"
+FPS = 30.0
+MAX_FRAMES = 1800        # at most 60 s per 100STYLE clip in clips.bin (keeps the first download small)
+CROUCH_H = 0.92          # crouch clips: keep the longest stretch with the pelvis below this (they start and end standing)
+
+# locomotion categories indexed as target windows / phase-aware clips
+LOCO = {"100style_walk", "100style_jog", "100style_idle", "100style_transitions",
+        "cmu_run", "cmu_run_turn", "cmu_run_stop", "cmu_jog", "cmu_crouch"}
+
+RUN_CATS = {"100style_jog", "cmu_run", "cmu_run_turn", "cmu_run_stop", "cmu_jog"}
+
+# actions: clip, key frame (fraction of the clip, a named key, or {"frame": n}), kind, anchor, and for clip-anchored
+# actions the frame their root motion is measured from. "static": the key frame held still (a pose, not a motion).
+ACTIONS = {
+    "idle":        {"clip": "100STYLE/Neutral_ID.bvh", "key": {"frame": 30}, "kind": "loop"},
+    "crouch_idle": {"clip": "CMU/136_10", "key": "crouch_still", "kind": "loop", "static": True},
+    "jump":        {"clip": "CMU/16_01", "key": "max_height", "kind": "oneshot"},
+    "duck":        {"clip": "CMU/77_09", "key": {"frame": 76}, "kind": "oneshot"},  # first duck: squat, head down, arms up
+    "dodge":       {"clip": "CMU/127_13", "key": "wide_step", "kind": "oneshot"},
+    "sit":         {"clip": "CMU/143_18", "key": "min_height", "kind": "oneshot"},
+    "sit_idle":    {"clip": "CMU/143_18", "key": "min_height", "kind": "oneshot", "anchor": "clip", "from": "min_height"},
+    "stand_up":    {"clip": "CMU/143_18", "key": "stood_up", "kind": "oneshot", "anchor": "clip", "from": "min_height"},
+}
 
 
-def key_frame(clip, key):
-    h = clip.local[:, 0, 1]
-    last = clip.num_frames - C.POSES_PER_TOKEN
-    if isinstance(key, (int, float)) and not isinstance(key, bool):
-        return int(np.clip(float(key) * last, 0, last))
-    return {"min_height": int(np.clip(np.argmin(h), 0, last)), "max_height": int(np.clip(np.argmax(h), 0, last)),
-            "end": last}.get(key, last // 2)
-
-
-CLIP_SOURCES = ["locomotion/bs_1d_linear", "locomotion/bs_2d_directional", "locomotion/bs_2d_directional_crouch",
-                "locomotion/idle/idle_loop_001__A268.bvh", "locomotion/idle/legs_relax_002__A407.bvh",
-                "locomotion/idle/neutral_looking_around_R_001__A542.bvh", "locomotion/idle/crouch_idle_001__A529.bvh"]
-
-
-def export_clips(lib, sk, lim) -> None:
-    """Continuous 30 fps clips (plus left/right mirrored copies) for phase-aware target selection.
-
-    clips.bin: per clip, float32 root position [F, 3] then int16 quaternions [F, Jm, 4] (/32767) for the
-    Jm joints the network predicts; every other joint takes the relaxed pose from joint_limits.json.
-
-    Real human walking from 100STYLE (CC BY 4.0) is appended when it has been retargeted
-    (tools/mocap/style100.py fetch + retarget). Its turns are balanced left/right, so no mirrored copies.
-    """
-    from somart.mirror import Mirror
-    meta_m = json.loads((ROOT / "showcase/build/cache/soma_mesh.json").read_text())
-    raw = (ROOT / "showcase/build/cache/soma_mesh.bin").read_bytes()
-    ib = meta_m["inverseBind"]
-    mirror = Mirror(sk, Mirror.bind_from_inverse_bind(
-        np.frombuffer(raw, np.float32, count=ib["length"], offset=ib["offset"]).reshape(-1, 16)))
-    joints = [sk.index(n) for n in C.JOINT_NAMES]
-    names = [n for s in CLIP_SOURCES for n in lib.find(s)]
-    have = set(names)
-    entries, blobs, off = [], [], 0
-    for name in dict.fromkeys(names):
-        clip = lib.clips[name]
-        local = clip.local.astype(np.float64).copy()
-        local[:, 1:, :3] = sk.reference[None, 1:, :3]
-        variants = [(name, local, False)]
-        if not (name.endswith("_M.bvh") or name.replace(".bvh", "_M.bvh") in have):
-            variants.append((name.replace(".bvh", "_mirror.bvh"), mirror(local), True))
-        for vname, loc, mir in variants:
-            loc = lim.apply(loc, relax_unmapped=True)
-            q = loc[:, joints, 3:]
-            q = np.where(q[..., 3:4] < 0, -q, q)
-            root = loc[:, 0, :3].astype(np.float32)
-            qi = np.round(q * 32767).astype(np.int16)
-            blob = root.tobytes() + qi.tobytes()
-            entries.append({"name": vname, "category": clip.tags.get("category", ""), "frames": int(len(loc)),
-                            "offset": off, "mirrored": mir})
-            blobs.append(blob)
-            off += len(blob)
-    sys.path.insert(0, str(ROOT / "tools/mocap"))
-    import style100
-
-    def real_blob(c, offset):
-        loc = lim.apply(c["local"], relax_unmapped=True)
-        q = loc[:, joints, 3:]
-        q = np.where(q[..., 3:4] < 0, -q, q)
-        blob = loc[:, 0, :3].astype(np.float32).tobytes() + np.round(q * 32767).astype(np.int16).tobytes()
-        return blob, {"name": c["name"], "category": c["category"], "frames": int(len(loc)), "offset": offset,
-                      "mirrored": False, "source": "100STYLE"}
-
+def load_free(sk) -> tuple[ClipLibrary, list[dict]]:
+    """All retargeted clips in one library (name -> Clip with category / crouch tags) + the raw 100STYLE list."""
+    lib = ClipLibrary(ROOT, skeleton=sk, fps=FPS)
     real = style100.load_retargeted()
-    base = [c for c in real if c["style"] == "Neutral"]
-    for c in base:
-        blob, e = real_blob(c, off)
-        entries.append(e)
-        blobs.append(blob)
-        off += len(blob)
-    print(f"{len(base)} real walking clips from 100STYLE" if real else
-          "100STYLE clips not built (tools/mocap/style100.py fetch && retarget): exporting NVIDIA clips only")
-    lic = "Derived from NVIDIA MotionBricks sample clips (NVIDIA Sample Data Evaluation License)"
-    if real:
-        lic += "; clips named 100STYLE/*: " + style100.LICENSE
+    if not real:
+        raise SystemExit("100STYLE not built: python3 -I tools/mocap/style100.py fetch && ... retarget")
+    trials = cmu.load_retargeted()
+    if not trials:
+        raise SystemExit("CMU not built: python3 -I tools/mocap/cmu.py fetch && ... retarget")
+    for c in real:
+        if c["style"] == "Neutral":
+            lib.add_clip(c["name"], Clip(sk, c["local"], FPS, c["name"]), {"category": c["category"], "source": "100STYLE"})
+    for c in trials:
+        local, crouch = c["local"], c["category"] == "cmu_crouch"
+        if crouch:  # longest run of crouched frames
+            low = local[:, 0, 1] < CROUCH_H
+            best, start = (0, 0), None
+            for i, v in enumerate(np.append(low, False)):
+                if v and start is None:
+                    start = i
+                elif not v and start is not None:
+                    best = max(best, (i - start, start)); start = None
+            local = local[best[1]:best[1] + best[0]]
+        lib.add_clip(c["name"], Clip(sk, local, FPS, c["name"]), {"category": c["category"], "source": "CMU", "crouch": crouch})
+    return lib, real
+
+
+def key_frame(sk, clip, key) -> int:
+    local = clip.local
+    last = clip.num_frames - C.POSES_PER_TOKEN
+    if isinstance(key, dict):
+        return int(np.clip(key["frame"], 0, last))
+    if isinstance(key, (int, float)):
+        return int(np.clip(float(key) * last, 0, last))
+    h = local[:last + 1, 0, 1]
+    if key == "min_height":
+        return int(np.argmin(h))
+    if key == "max_height":
+        return int(np.argmax(h))
+    if key == "end":
+        return last
+    w = sk.fk(local)
+    if key == "wide_step":  # widest sideways spread of the feet relative to the body heading (a side step)
+        from somart.clips import heading_of
+        yaw = heading_of(w, sk)
+        d = w[:, sk.index("LeftFoot"), [0, 2]] - w[:, sk.index("RightFoot"), [0, 2]]
+        lat = np.abs(d[:, 0] * np.cos(yaw) - d[:, 1] * np.sin(yaw))
+        return int(np.argmax(lat[:last + 1]))
+    if key == "stood_up":  # first frame after the lowest pelvis where the body is upright again
+        k0, stand = int(np.argmin(h)), np.percentile(h, 90)
+        up = np.flatnonzero(h[k0:] >= 0.97 * stand)
+        return k0 + int(up[0]) if len(up) else last
+    if key == "crouch_still":  # slowest crouched frame with the feet close together (both planted)
+        lf, rf = sk.index("LeftFoot"), sk.index("RightFoot")
+        sp = np.linalg.norm(np.gradient(w[:, 0, [0, 2]], axis=0), axis=1) * FPS
+        sep = np.linalg.norm(w[:, lf, [0, 2]] - w[:, rf, [0, 2]], axis=1)
+        return int(np.argmin((sp + 2 * sep)[:last + 1]))
+    return last // 2
+
+
+def ground_yaw(sk, local):
+    from somart.controller import CharacterController
+    return CharacterController._ground_and_yaw(type("S", (), {"sk": sk})(), local)
+
+
+def build_windows(lib, sk, lim):
+    # sparse: the phase-aware clips (clips.bin) are the main target source; windows are the fallback and the actions.
+    # 100STYLE clips are long (one stride every ~35 frames), the CMU ones short and varied.
+    wins = []
+    for src, stride in (("100STYLE", 40), ("CMU", 12)):
+        lib.index_windows([n for n, c in lib.clips.items() if c.tags["category"] in LOCO and c.tags["source"] == src], stride=stride)
+        wins += lib.windows
+    meta = [{"v": [round(float(w.velocity[0]), 4), round(float(w.velocity[1]), 4)], "yr": round(float(w.yaw_rate), 4),
+             "h": round(float(w.height), 4), "cat": w.tags.get("category", ""), "kind": "loco",
+             "crouch": bool(w.tags.get("crouch", False))} for w in wins]
+    actions = {}
+    for name, a in ACTIONS.items():
+        clip = lib.clips[a["clip"]]
+        k = key_frame(sk, clip, a["key"])
+        w = lib.window_at(a["clip"], k)
+        if a.get("static"):
+            w.local = np.repeat(w.local[:1], C.POSES_PER_TOKEN, axis=0)
+        f0 = key_frame(sk, clip, a.get("from", {"frame": 0}))
+        g0, gk = ground_yaw(sk, clip.local[f0]), ground_yaw(sk, clip.local[k])
+        actions[name] = {"window": len(wins), "anchor": a.get("anchor", ""), "kind": a["kind"], "source": a["clip"], "frame": k,
+                         "root0": [float(g0[0][0]), float(g0[0][2]), g0[1]], "rootk": [float(gk[0][0]), float(gk[0][2]), gk[1]]}
+        wins.append(w)
+        meta.append({"v": [0, 0], "yr": 0, "h": round(float(w.height), 4), "cat": name, "kind": "action",
+                     "crouch": name == "crouch_idle"})
+    local = np.stack([lim.apply(w.local, relax_unmapped=True) for w in wins])     # [W, 4, J, 7]
+    root = local[:, :, 0, :3].astype(np.float32)
+    q = local[..., 3:]
+    q = np.where(q[..., 3:4] < 0, -q, q)
+    qi = np.round(q * 32767).astype(np.int16)
+    with open(OUT / "windows.bin", "wb") as f:
+        f.write(root.tobytes())
+        f.write(qi.tobytes())
+    (OUT / "windows.json").write_text(json.dumps({
+        "count": len(wins), "frames": 4, "joints": sk.num_joints, "layout": "float32 root[W,4,3] then int16 quat[W,4,J,4] (/32767)",
+        "windows": meta, "actions": actions, "license": f"{style100.LICENSE}; {cmu.LICENSE}"}))
+    print(f"{len(wins)} windows ({(OUT / 'windows.bin').stat().st_size / 1e6:.2f} MB), {len(actions)} actions")
+
+
+def blob_of(lim, joints, local, offset, entry):
+    loc = lim.apply(local, relax_unmapped=True)
+    q = loc[:, joints, 3:]
+    q = np.where(q[..., 3:4] < 0, -q, q)
+    blob = loc[:, 0, :3].astype(np.float32).tobytes() + np.round(q * 32767).astype(np.int16).tobytes()
+    return blob, dict(entry, frames=int(len(loc)), offset=offset, mirrored=False)
+
+
+def export_clips(lib, sk, lim, real) -> None:
+    """clips.bin: per clip, float32 root position [F, 3] then int16 quaternions [F, Jm, 4] (/32767) for the Jm joints
+    the network predicts; every other joint takes the relaxed pose from joint_limits.json."""
+    joints = [sk.index(n) for n in C.JOINT_NAMES]
+    entries, blobs, off = [], [], 0
+    for name, clip in lib.clips.items():
+        t = clip.tags
+        if t["category"] not in LOCO:
+            continue
+        local = clip.local[:MAX_FRAMES] if t["source"] == "100STYLE" else clip.local
+        run = t["category"] in RUN_CATS  # jogs and runs: never a walking target, whatever their stride period
+        blob, e = blob_of(lim, joints, local, off, {"name": name, "category": t["category"], "source": t["source"],
+                                                     **({"crouch": True} if t.get("crouch") else {}), **({"gait": "run"} if run else {})})
+        entries.append(e); blobs.append(blob); off += len(blob)
     # optional walk styles: one file each, fetched by the page only when the style is chosen.
     # pace = the style's typical forward-walk speed (75th percentile), used as its walking speed.
     styles = []
@@ -115,17 +196,15 @@ def export_clips(lib, sk, lim) -> None:
             continue
         s_entries, s_blobs, s_off = [], [], 0
         for c in cs:
-            blob, e = real_blob(c, s_off)
-            s_entries.append(e)
-            s_blobs.append(blob)
-            s_off += len(blob)
+            blob, e = blob_of(lim, joints, c["local"], s_off, {"name": c["name"], "category": c["category"], "source": "100STYLE"})
+            s_entries.append(e); s_blobs.append(blob); s_off += len(blob)
         (OUT / "styles" / f"{st}.bin").write_bytes(b"".join(s_blobs))
         (OUT / "styles" / f"{st}.json").write_text(json.dumps({
-            "fps": lib.fps, "joints": [sk.names[j] for j in joints], "clips": s_entries, "style": st,
+            "fps": FPS, "joints": C.JOINT_NAMES, "clips": s_entries, "style": st,
             "layout": "per clip: float32 root[F,3] then int16 quat[F,Jm,4] (/32767); other joints: relaxed pose",
             "license": style100.LICENSE}))
         fw = next(c["local"] for c in cs if c["kind"] == "FW")
-        sp = np.linalg.norm(np.gradient(fw[:, 0, [0, 2]], axis=0), axis=1) * lib.fps
+        sp = np.linalg.norm(np.gradient(fw[:, 0, [0, 2]], axis=0), axis=1) * FPS
         pace = round(float(np.percentile(sp[sp > 0.3], 75)) * 20) / 20
         styles.append({"key": st, "label": label, "file": f"data/styles/{st}", "pace": pace,
                        "frames": sum(e["frames"] for e in s_entries), "bytes": s_off})
@@ -134,62 +213,97 @@ def export_clips(lib, sk, lim) -> None:
         for b in blobs:
             f.write(b)
     (OUT / "clips.json").write_text(json.dumps({
-        "fps": lib.fps, "joints": [sk.names[j] for j in joints], "clips": entries,
+        "fps": FPS, "joints": C.JOINT_NAMES, "clips": entries,
         "layout": "per clip: float32 root[F,3] then int16 quat[F,Jm,4] (/32767); other joints: relaxed pose",
-        "license": lic, "styles": styles}))
-    total = sum(e["frames"] for e in entries)
-    print(f"{len(entries)} clips, {total} frames ({off / 1e6:.2f} MB) -> clips.bin")
+        "license": f"clips named 100STYLE/*: {style100.LICENSE}; clips named CMU/*: {cmu.LICENSE}", "styles": styles}))
+    print(f"{len(entries)} clips, {sum(e['frames'] for e in entries)} frames ({off / 1e6:.2f} MB) -> clips.bin")
+
+
+HINGES = {f"{s}{j}" for s in ("Left", "Right") for j in ("Shin", "ForeArm", "ToeBase")}  # knees, elbows, toes
+# normal adult range of motion (clinical reference values): the flexion side of a hinge reaches at least this far,
+# so deep crouches, landings and sitting that the free clips do not contain are not clipped
+ROM_DEG = {"Shin": 145.0, "ForeArm": 150.0}
+
+
+# Relaxed hand: extra flexion (deg) per finger joint 1..4 on top of the SOMA bind pose, whose fingers are nearly
+# straight (retargeted clips carry no finger motion). Authored to look like a loose, resting hand; the page's finger
+# layer (FingerAnimator) adds speed-dependent curl and sway on top.
+CURL = {"Thumb": [0, 14, 10], "Index": [0, 14, 12, 14], "Middle": [0, 16, 14, 14], "Ring": [0, 18, 14, 14], "Pinky": [0, 18, 14, 12]}
+
+
+def relaxed_hands(sk, relaxed: dict) -> dict:
+    """Curl the fingers of the relaxed pose toward the palm (same axis construction as FingerAnimator in controller.js)."""
+    loc = sk.reference.copy()
+    for n, q in relaxed.items():
+        loc[sk.index(n), 3:] = q
+    w = sk.fk(loc[None])[0]
+    out = dict(relaxed)
+    for side in ("Left", "Right"):
+        h, m1, mt = (sk.index(f"{side}{n}") for n in ("Hand", "HandMiddle1", "HandMiddleEnd"))
+        base = w[m1, :3] - w[h, :3]; base /= np.linalg.norm(base)
+        tip = w[mt, :3] - w[m1, :3]
+        palm = tip - base * (tip @ base); palm /= np.linalg.norm(palm)
+        for f, angles in CURL.items():
+            for k, deg in enumerate(angles, 1):
+                c = sk.index(f"{side}Hand{f}{k}")
+                kid = int(np.flatnonzero(sk.parents == c)[0]) if c >= 0 and (sk.parents == c).any() else -1
+                if c < 0 or kid < 0 or not deg:
+                    continue
+                bdir = w[kid, :3] - w[c, :3]; bdir /= np.linalg.norm(bdir)
+                n = palm + 0.6 * base if f == "Thumb" else palm
+                ax = np.cross(bdir, n / np.linalg.norm(n)); ax /= np.linalg.norm(ax)
+                ax_local = m3.quat_rotate(m3.quat_conj(w[c, 3:]), ax)
+                q = m3.quat_mul(np.asarray(out.get(sk.names[c], loc[c, 3:])), m3.quat_from_axis_angle(ax_local, np.radians(deg)))
+                out[sk.names[c]] = m3.normalize(q).tolist()
+    return out
+
+
+def fit_limits(lib, sk) -> JointLimits:
+    """Anatomical limits from every free clip (locomotion and actions).
+
+    Knees, elbows and toes are hinges: one flexion axis and its range, fitted on the data (retargeted rigs carry a
+    few degrees of twist there, which a free fit would keep and which shows up as bowed shins and twisted forearms).
+    Model joints the retargeters do not drive (jaw, eyes, finger ends) stay at the SOMA rig's reference rotation;
+    Neck2, also undriven, stays free. Everything else uses JointLimits.fit (constrained where the data is low-rank).
+    """
+    from somart.anatomy import JointLimit
+    frames = np.concatenate([c.local for c in lib.clips.values()])
+    lim = JointLimits.fit(frames, sk)
+    driven = set(style100.MAP) | set(cmu.MAP)
+    out = []
+    for name in C.JOINT_NAMES[1:]:
+        j = sk.index(name)
+        if name in HINGES:
+            r = m3.quat_to_scaled_axis(m3.quat_abs(frames[:, j, 3:]))
+            axis = np.linalg.svd(r, full_matrices=False)[2][:1]
+            coords = r @ axis.T
+            m = np.radians(3.0)
+            lo, hi = np.percentile(coords, 0.2, axis=0) - m, np.percentile(coords, 99.8, axis=0) + m
+            rom = ROM_DEG.get(name.removeprefix("Left").removeprefix("Right"))
+            if rom:  # the flexion side is the one the data reaches furthest on
+                if -lo[0] > hi[0]:
+                    lo[0] = min(lo[0], -np.radians(rom))
+                else:
+                    hi[0] = max(hi[0], np.radians(rom))
+            out.append(JointLimit(name, 1, axis, lo, hi, m3.quat_from_scaled_axis((coords.mean(0) * axis).sum(0))))
+        elif name not in driven and name != "Neck2":
+            out.append(JointLimit(name, 0, np.zeros((0, 3)), np.zeros(0), np.zeros(0), sk.reference[j, 3:].copy()))
+        else:
+            out += [x for x in lim.limits if x.joint == name]
+    lim = JointLimits(out, relaxed_hands(sk, lim.relaxed))
+    lim.save(ROOT / "configs/skeletons/soma_joint_limits.json")
+    (OUT / "joint_limits.json").write_text((ROOT / "configs/skeletons/soma_joint_limits.json").read_text())
+    print(f"joint limits: {len(lim.limits)} constrained, {len(lim.relaxed)} relaxed joints from {len(frames)} frames")
+    return lim
 
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
-    cfg = Config.load("balanced")
-    lib = ClipLibrary(ROOT / cfg.get("clips.root")).load()
-    sk = lib.skeleton
-    lim = JointLimits.load(ROOT / cfg.get("skeleton.joint_limits")).bind(sk)
-    loco = [cfg.get(f"actions.{a}.source") for a in ("walk", "strafe", "crouch", "idle", "crouch_idle")]
-    lib.index_windows(loco, stride=3)
-    wins = list(lib.windows)
-    meta = [{"v": [round(float(w.velocity[0]), 4), round(float(w.velocity[1]), 4)], "yr": round(float(w.yaw_rate), 4),
-             "h": round(float(w.height), 4), "cat": w.tags.get("category", ""), "kind": "loco"} for w in wins]
-    actions = {}
-    for name, a in cfg.get("actions").items():
-        if a.get("kind") != "oneshot" and name not in ("idle", "crouch_idle"):
-            continue
-        names = lib.find(a["source"])
-        if not names:
-            continue
-        clip = lib.clips[names[0]]
-        k = key_frame(clip, a.get("key", "middle")) if a.get("kind") == "oneshot" else 30
-        w = lib.window_at(names[0], k)
-        # clip root motion from frame 0 to the key frame (for anchor: clip)
-        ctrl_like = __import__("somart.controller", fromlist=["CharacterController"]).CharacterController
-        g0 = ctrl_like._ground_and_yaw(type("S", (), {"sk": sk})(), clip.local[0])
-        gk = ctrl_like._ground_and_yaw(type("S", (), {"sk": sk})(), clip.local[k])
-        actions[name] = {"window": len(wins), "anchor": a.get("anchor", ""), "kind": a.get("kind", ""),
-                         "root0": [float(g0[0][0]), float(g0[0][2]), g0[1]], "rootk": [float(gk[0][0]), float(gk[0][2]), gk[1]]}
-        wins.append(w)
-        meta.append({"v": [0, 0], "yr": 0, "h": round(float(w.height), 4), "cat": name, "kind": "action"})
-    export_clips(lib, sk, lim)
-    local = np.stack([lim.apply(w.local, relax_unmapped=True) for w in wins])     # [W, 4, J, 7]
-    root = local[:, :, 0, :3].astype(np.float32)                                 # [W, 4, 3]
-    q = local[..., 3:]
-    q = np.where(q[..., 3:4] < 0, -q, q)
-    qi = np.round(q * 32767).astype(np.int16)                                    # [W, 4, J, 4]
-    with open(OUT / "windows.bin", "wb") as f:
-        f.write(root.tobytes())
-        f.write(qi.tobytes())
-    (OUT / "windows.json").write_text(json.dumps({
-        "count": len(wins), "frames": 4, "joints": sk.num_joints, "layout": "float32 root[W,4,3] then int16 quat[W,4,J,4] (/32767)",
-        "windows": meta, "actions": actions,
-        "license": "Derived from NVIDIA MotionBricks sample clips (NVIDIA Sample Data Evaluation License)"}))
-    (OUT / "skeleton.json").write_text(json.dumps({"names": sk.names, "parents": sk.parents.tolist(),
-                                                    "reference": np.round(sk.reference, 6).tolist()}))
-    shutil.copy(ROOT / cfg.get("skeleton.joint_limits"), OUT / "joint_limits.json")
-    mesh = ROOT / "showcase/build/cache"
-    for f in ("soma_mesh.bin", "soma_mesh.json"):
-        shutil.copy(mesh / f, OUT / f)
-    print(f"{len(wins)} windows ({(OUT / 'windows.bin').stat().st_size / 1e6:.2f} MB), {len(actions)} actions -> {OUT}")
+    sk, _ = style100.soma_skeleton()
+    lib, real = load_free(sk)
+    lim = fit_limits(lib, sk).bind(sk)
+    build_windows(lib, sk, lim)
+    export_clips(lib, sk, lim, real)
     return 0
 
 
