@@ -12,7 +12,8 @@
 
 ## Model limitations (inherited from the released SOMA model)
 
-- Human only, one 30-joint SOMA skeleton. **No animal capability** (see `ANIMALS.md`).
+- Human only, one 30-joint SOMA skeleton. No animal capability (the animal network that used to live here is now
+  a separate project).
 - Conditioning is poses + root constraints only: no text, no scene geometry, no physics.
   Obstacles, contacts with objects and balance are the application's job.
 - Each generation covers 0.6–1.9 s (6–16 tokens); longer motion is chained segments.
@@ -62,21 +63,6 @@
 - The body layer (muscle bulges, breathing, soft tissue, mouth opening when out of breath) is
   procedural and tuned by eye; the model and the mocap contain no muscle, breath or face data.
   The mesh has no eyelids or separately skinned eyes, so there is no blinking or eye motion.
-- Animals in the web playground are realistic Sketchfab models (CC BY, one CC BY-SA, the cat CC BY-NC)
-  driven by a small network trained here on 41 minutes of dog motion capture (CC BY-NC 4.0,
-  non-commercial). Only the dog is real motion data; every other species moves like a dog on its own
-  body (the horse does not trot or canter like a horse, the elephant bends its legs like a dog, the
-  rabbit runs instead of hopping, the bear is not plantigrade). The data has lying down, rearing up and
-  about ten forward leaps, which are learned; it has almost no sitting, so Sit lies down, and the
-  elephant rears instead of jumping. Rearing is not allowed in the 1.6 s after a leap (that transition
-  twisted the bear, tiger and horse models). No freely licensed, rigged and realistic deer or lion was
-  found, so those two species were replaced; a polar bear model was dropped because the dog's leg angles
-  folded its short legs into the body. Fur is texture only (no fur simulation), and the models' own
-  facial bones (ears, jaw, eyes) are not animated. Species differences beyond the body (rabbit bounding,
-  no elephant gallop, speed and step rate) are hand-set styles on top of the dog network, not learned.
-  Tripo AI generation was set up but not used: the account had no API credits; free image-to-3D tools
-  (TripoSR, TRELLIS) give unrigged, lower-quality meshes than the Sketchfab models used. The SOMA model itself was not retrained: it was
-  released without training code.
 - Starts and turns are planned within human acceleration, so a 180 deg reversal takes about 0.6 s and a
   stop from a sprint 0.5-0.64 s (snappier gameplay presets used to allow 0.4-0.5 s with a sprinter's
   lunge). The network can still produce a body flip on a reversal; such results are discarded and
@@ -84,34 +70,26 @@
 - Adaptive quality lowers resolution and shadows only; it does not reduce the SOMA network's cost,
   which the controller already limits to one request in flight. Phones were not available for testing:
   the slow-device numbers come from emulated latency and the headless software renderer.
-- The SOMA network was not retrained or fine-tuned (no training code or training data was released);
-  "trained here" applies to the animal network only. The human and animal networks are not fused into
-  one computation: they never run together, so fusing would not lower CPU use.
-- Animal skin still stretches where a dog's range of motion exceeds what a model was skinned for (horse and
-  rabbit hips, cat and fox shoulders at a gallop; up to ~2x on the 1 % worst mesh edges). The models' own skin
-  weights are used as authored; no muscles are simulated, the muscle layer is a displacement driven by gait.
-  The elephant's front legs can cross briefly when it pivots in place, and its hind feet (no separate foot bone)
-  can still sink 1-2 % of hip height when the shin tilts. Faster steering of the animal network
-  adds 10-25 % paw sliding while moving for some species.
+- The SOMA network was not retrained or fine-tuned (no training code or training data was released).
 - Fighting moves: the key poses are hand-built by IK, the motion into and out of them is SOMA; the
   model was not trained on fighting, so strikes are less crisp than captured martial arts.
-- Target windows come from 4,737 mocap frames (with mirrored copies); straight running near
-  3.4 m/s and sprinting are still thinly covered (about 20 and 14 frames before mirroring).
+- Motion targets come from freely licensed captures (100STYLE, CMU; 16k clip frames). Sprinting (5.5 m/s) is faster
+  than any capture (up to 4.5 m/s), so the network extrapolates; crouching is one CMU performer's moderate crouch
+  (pelvis ~0.85 m), there is no deep crouch walk; the sit is one stool-height capture. Different performers and
+  capture rigs mean slightly different proportions and styles between walking (100STYLE) and running (CMU).
 
 ## Training
 
 - **No training or fine-tuning was performed.** The package has no training code, optimizer
-  state, or training data; the only motion data here is evaluation-licensed. See `TRAINING.md`
-  for what would be needed.
+  state, or training data. See `TRAINING.md` for what would be needed.
 
 ## Data / licensing
 
-- The sample BVH clips and everything derived from them (eval set, generated BVH previews) are
-  under the NVIDIA Sample Data Evaluation License and are **not committed**; they are fetched
-  locally by `tools/fetch_upstream.py`.
+- NVIDIA's sample BVH clips (NVIDIA Sample Data Evaluation License) and anything derived from them are
+  **not committed**; the Python runtime's clip library and evaluation read them from a local
+  `tools/fetch_upstream.py` download.
 - Model weights (NVIDIA Open Model Agreement) are downloaded, not committed (size); exact
   checksums are committed in `models/soma/checksums/`.
-- Exception for the web playground: `site/models/` (INT8 web copy of the weights) and
-  `site/data/windows.*` (motion windows derived from the evaluation-licensed sample clips) are
-  committed so the site can be served. The repository is private; enabling GitHub Pages would
-  make both public (see `site/README.md`).
+- The web playground commits `site/models/` (a quantized copy of the weights, NVIDIA Open Model License, with
+  attribution) and `site/data/` (motion targets from 100STYLE, CC BY 4.0, and the CMU database, free for all uses;
+  the SOMA mesh, CC BY 4.0) so the site can be served; see `NOTICE`.

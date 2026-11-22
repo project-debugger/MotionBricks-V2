@@ -5,7 +5,7 @@ Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES, licensed under the Apache Li
 
 - runtime/somart/codec.py      NumPy port of motionbricks/model/soma/kernels.py and
                                motionbricks/model/kernels.py (encode, decode, conditions,
-                               endpoint correction)
+                               endpoint correction); site/js/codec.js ports the same to JavaScript
 - runtime/somart/skeleton.py   BVH loading logic ported from motionbricks/io/bvh.py
 - runtime/somart/contract.py   constants from motionbricks/model/contract.py and soma_n1.json
 
@@ -16,40 +16,23 @@ velocity-matching and contact-aware options in codec.py.
 Model weights: NVIDIA Open Model Agreement ("Licensed by NVIDIA Corporation under the NVIDIA Open
 Model License"). site/models/ holds an INT8-quantized derivative for the web demo, stored in a split GGUF file
 whose INT8 matrix weights are re-coded with ggml Q5_0 blocks (tools/gguf/build_gguf.py).
-Sample motion clips: NVIDIA Sample Data Evaluation License. The clips are not redistributed here;
-site/data/windows.* contains motion windows derived from them (internal evaluation use).
-SOMA body mesh (site/data/soma_mesh.*): extracted from the upstream MotionBricks asset
-soma_base_skel_minimal_no_root.usd, NVIDIA, CC BY 4.0.
+site/data/bank.* holds output of that model.
 
-site/data/clips.* (clips named 100STYLE/*) and site/data/styles/*: motion capture from the 100STYLE dataset by
-Ian Mason, Sebastian Starke and Taku Komura, "Real-Time Style Modelling of Human Locomotion via Feature-Wise
-Transformations and Local Motion Phases" (2022), https://doi.org/10.5281/zenodo.8127870, licensed CC BY 4.0
-(https://creativecommons.org/licenses/by/4.0/). Modified: retargeted onto the SOMA rig, trimmed with the
-dataset's frame cuts, resampled to 30 fps and quantized (tools/mocap/style100.py, tools/export_web_data.py).
+SOMA body mesh (site/data/soma_mesh.*) and rig (site/data/skeleton.json): extracted from the upstream
+MotionBricks asset soma_base_skel_minimal_no_root.usd (tools/extract_mesh.py), NVIDIA, CC BY 4.0.
 
-site/vendor/ redistributes, unmodified: onnxruntime-web 1.31.1 (Microsoft, MIT), three.js 0.170.0
-(MIT, including addons/loaders/GLTFLoader.js and addons/utils/BufferGeometryUtils.js);
+Motion capture (site/data/windows.*, clips.*, styles/*; targets for the network, not played back):
+- 100STYLE dataset by Ian Mason, Sebastian Starke and Taku Komura, "Real-Time Style Modelling of Human
+  Locomotion via Feature-Wise Transformations and Local Motion Phases" (2022),
+  https://doi.org/10.5281/zenodo.8127870, licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+  Clips named 100STYLE/*.
+- CMU Graphics Lab Motion Capture Database. The data used in this project was obtained from mocap.cs.cmu.edu.
+  The database was created with funding from NSF EIA-0196217. Free for all uses (it may be copied, modified or
+  redistributed; it may not be resold directly). Clips named CMU/<subject>_<trial>.
+Both modified: retargeted onto the SOMA rig (arms re-solved with two-bone IK), trimmed, resampled to 30 fps and
+quantized (tools/mocap/style100.py, tools/mocap/cmu.py, tools/export_web_data.py). The joint limits
+(configs/skeletons/soma_joint_limits.json, site/data/joint_limits.json) are fitted on the same clips, the
+hinge axes (configs/skeletons/soma_hinges.json) on the model's own output, and the relaxed hand pose is authored.
+
+site/vendor/ redistributes, unmodified: onnxruntime-web 1.31.1 (Microsoft, MIT), three.js 0.170.0 (MIT);
 site/coi-serviceworker.js (Guido Zuidhof, MIT). Licence texts are in site/vendor/.
-
-
-site/models/balanced/motionbricks-*.gguf, shard 1 (animal network): weights trained in this repository
-(tools/animal/train_mann.py, packed by tools/gguf/build_gguf.py) on the
-dog motion capture of Zhang, Starke, Komura and Saito, "Mode-Adaptive Neural Networks for Quadruped Motion
-Control" (SIGGRAPH 2018), https://github.com/sebastianstarke/AI4Animation, licensed CC BY-NC 4.0. The weights
-are a derivative of that data: non-commercial use only, with attribution. The raw data is not redistributed.
-
-site/data/animal/models/*.glb: 3D animal models from Sketchfab (downloaded from the Objaverse mirror,
-https://huggingface.co/datasets/allenai/objaverse), modified for the web demo (animations removed, textures
-resized and re-encoded; tools/animal/pack_models.py). Each keeps its own licence:
-  dog.glb       "Animated Dog, Shiba Inu" by quander, CC BY 4.0, https://sketchfab.com/3d-models/9abfce885a834399b2c3ccaed51cd474
-  wolf.glb      "Wolf" by HiagoTadeu, CC BY 4.0, https://sketchfab.com/3d-models/9e7aceacef0f4486b605abdf1f62e4ac
-  fox.glb       "Fox" by alexanders823, CC BY 4.0, https://sketchfab.com/3d-models/4e37c303f8a241aaa2511bd9f3019273
-  cat.glb       "Cat - Walking" by pamoan10, CC BY-NC 4.0 (non-commercial), https://sketchfab.com/3d-models/827aa2c7951747599629700703050673
-  horse.glb     "Horse" by alainsorazu, CC BY-SA 4.0 (this modified copy is shared under CC BY-SA 4.0), https://sketchfab.com/3d-models/bef74ed402cc40e996eea028668d3c1c
-  bear.glb      "Bear" by Nyilonelycompany, CC BY 4.0, https://sketchfab.com/3d-models/ce0d5eb86cf5459bb6bd20244cb44b27
-  elephant.glb  "walking elephant" by syaharanichan, CC BY 4.0, https://sketchfab.com/3d-models/2705e7483341479e8015d996cd766611
-  tiger.glb     "Running Tiger" by francescolima74, CC BY 4.0, https://sketchfab.com/3d-models/fc2c7fd74dd04e39935803b884c77258
-  jaguar.glb    "jaguar" by Ear.Rodriguez, CC BY 4.0, https://sketchfab.com/3d-models/91c61c329d2a4668816f81f08dfcd492
-  rabbit.glb    "Rabbit Rigged" by FourthGreen, CC BY 4.0, https://sketchfab.com/3d-models/e7213589744d436b9d96e2dbb31198a5
-Licences: https://creativecommons.org/licenses/by/4.0/, https://creativecommons.org/licenses/by-sa/4.0/,
-https://creativecommons.org/licenses/by-nc/4.0/. The licences are as declared by the uploaders on Sketchfab.

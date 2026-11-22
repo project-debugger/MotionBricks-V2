@@ -1,13 +1,11 @@
-# Deploys the SOMA Playground (site/) to GitHub Pages.
+# Deploys the playable demo (site/) to GitHub Pages.
 # One-time setup: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
 # Until Pages is enabled the job only prints a notice, so pushes do not fail.
-# NOTE: a Pages site is public. site/data/windows.* is derived from NVIDIA sample clips under the
-# NVIDIA Sample Data Evaluation License; see site/README.md before enabling Pages.
 name: Deploy SOMA Playground
 
 on:
   push:
-    branches: [ccr-468f6080-jy7q4r]
+    branches: [main, ccr-468f6080-jy7q4r]
     paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
@@ -55,9 +53,12 @@ jobs:
           import hashlib, json, pathlib
           site = pathlib.Path("_site")
           for key, m in json.loads((site / "models/models.json").read_text())["models"].items():
-              for p in m["parts"]:
-                  f = site / "models" / key / p["file"]
-                  assert hashlib.sha256(f.read_bytes()).hexdigest() == p["sha256"], f"checksum mismatch: {f}"
+              h = hashlib.sha256()
+              for p in m["parts"]:  # the manifest's sha256 covers all shards in order
+                  b = (site / "models" / key / p["file"]).read_bytes()
+                  assert len(b) == p["bytes"], f"size mismatch: {p['file']}"
+                  h.update(b)
+              assert h.hexdigest() == m["sha256"], f"checksum mismatch: {key}"
               print(f"{key}: {len(m['parts'])} parts verified")
           EOF
 

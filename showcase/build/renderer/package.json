@@ -1,7 +1,0 @@
-{
-  "name": "soma-showcase-renderer",
-  "private": true,
-  "description": "Offline three.js renderer for MotionBricks SOMA showcase videos",
-  "type": "module",
-  "dependencies": { "three": "0.170.0" }
-}

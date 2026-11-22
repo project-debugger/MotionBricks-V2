@@ -2,7 +2,8 @@
 
 The goal is game-quality feel: immediate response, believable acceleration and weight, no pops,
 no foot skating. "AAA feel" is not a single metric, so every claim below is tied to a measurement
-in `benchmarks/` (held-out mocap comparisons, and a real-time 60 Hz gameplay script).
+made with the earlier benchmark scripts (held-out mocap comparisons, and a real-time 60 Hz gameplay script;
+they ran on NVIDIA's evaluation-licensed clips and were removed with them).
 
 ## What improves the feel, and how much (measured)
 

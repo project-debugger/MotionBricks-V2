@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write site/index.html (GitHub Pages, full document) and build/artifact/index.html (claude.ai body-only)."""
+"""Write site/index.html (the full page served by GitHub Pages) from site/index.src.html."""
 from pathlib import Path
 
 SITE = Path(__file__).resolve().parents[1]
@@ -12,8 +12,4 @@ head = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
 title_end = src.index("</style>") + len("</style>")
 full = head + src[:title_end] + "\n</head>\n<body>\n" + src[title_end:] + "\n</body>\n</html>\n"
 (SITE / "index.html").write_text(full)
-art = SITE / "build" / "artifact"
-art.mkdir(parents=True, exist_ok=True)
-# claude.ai artifacts accept only standard web media types: the binary parts are published as .wasm (same bytes)
-(art / "index.html").write_text('<meta name="soma-bin-ext" content=".wasm">\n' + src)
-print("wrote site/index.html and site/build/artifact/index.html")
+print("wrote site/index.html")

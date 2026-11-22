@@ -26,7 +26,6 @@ async function getJSON(p) { const r = await fetch(BASE + p); if (!r.ok) throw ne
 // hosts that refuse .bin files (claude.ai artifacts) serve the same bytes under another extension
 const BIN_EXT = document.querySelector('meta[name="soma-bin-ext"]')?.content || '.bin';
 async function getBin(p) { p = p.replace(/\.bin$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
-async function getGlb(p) { if (BIN_EXT !== '.bin') p = p.replace(/\.(glb|gguf|wasm)$/, BIN_EXT); const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.arrayBuffer(); }
 
 // ------------------------------------------------------------------ renderer
 function gridTexture() {

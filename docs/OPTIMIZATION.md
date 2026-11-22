@@ -2,7 +2,7 @@
 
 All numbers: Intel Xeon (Sapphire-Rapids-class: AVX-512 VNNI/BF16/FP16, AMX-INT8/BF16), 4 vCPU,
 15.7 GB RAM, **no GPU**, onnxruntime 1.32 CPU EP, torch 2.14 CPU. Full tables:
-[`benchmarks/REPORT_models.md`](../benchmarks/REPORT_models.md). Re-run: `benchmarks/run_benchmarks.py`.
+the earlier benchmark report (its scripts ran on NVIDIA's evaluation-licensed eval set and were removed with it).
 
 ## Baseline and correctness
 
@@ -102,7 +102,7 @@ Single-thread speed-ups are larger (INT8 ×2.5–2.6, INT8-pose ×2.0): INT8-pos
 
 ## Web model: one split GGUF, Q5_0 storage (INT8 compute)
 
-`tools/gguf/build_gguf.py` packs the browser's SOMA model and the animal network into one GGUF model split into 13
+`tools/gguf/build_gguf.py` packs the browser's SOMA model into one GGUF model split into 12
 shards (llama.cpp `split.*` keys, each shard a valid GGUF; `gguf-py` reads them). The 136 M dynamic-INT8 weights of the
 pose transformer's matrix multiplies are re-coded with ggml's Q5_0 blocks for storage and decoded back onto the INT8
 grid in the browser (integer math, ~0.5 s for all of them on this CPU), so the onnxruntime graph, speed and memory are

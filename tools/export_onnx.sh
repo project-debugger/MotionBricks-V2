@@ -10,7 +10,7 @@ mkdir -p third_party/pkgs
 ln -sfn ../motionbricks/tools/onnx third_party/pkgs/motionbricks_onnx
 export PYTHONPATH="$PWD/third_party/pkgs${PYTHONPATH:+:$PYTHONPATH}"
 OUT=models/soma/optimized/onnx
-mkdir -p "$OUT" benchmarks/logs
+mkdir -p "$OUT" logs
 for p in ${PRECISIONS:-fp32 fp16}; do
   echo "[export] precision=$p"
   start=$(date +%s)

@@ -16,22 +16,17 @@ models/soma/optimized/onnx/
 *.safetensors
 *.part
 
-# Data derived from evaluation-licensed clips (rebuild with datasets/build_eval_set.py)
-datasets/soma_eval/
+# Local data derived from evaluation-licensed clips (never committed)
+datasets/
 
-# Large / local benchmark artefacts
-benchmarks/results/_dumps/
-benchmarks/results/tmp/
-benchmarks/output/
+# Local logs and benchmark output
+logs/
+benchmarks/
 
-# Showcase renderer: npm deps and generated intermediates (rebuild with showcase/build/make_all.sh)
-showcase/build/renderer/node_modules/
-showcase/build/renderer/package-lock.json
-showcase/build/cache/
 site/models/*/model.onnx.local
 site/build/node_modules/
 site/build/package-lock.json
 
-# Downloaded third-party mocap (re-fetch with tools/mocap/style100.py fetch)
+# Downloaded third-party mocap (re-fetch with tools/mocap/style100.py fetch / tools/mocap/cmu.py fetch)
 data/external/
 site/data/raw_output.*

@@ -7,7 +7,13 @@ can be tuned in the settings panel.
 
 Nothing is pre-baked: the page sends the last poses and a target pose window to the network,
 then decodes and post-processes the result in JavaScript. The pipeline is a port of the Python
-runtime in `runtime/somart/`, checked against it to float precision (`build/test/parity.html`).
+runtime in `runtime/somart/`, checked against it to float precision.
+
+> **Measurements below** were taken while the motion targets still came from NVIDIA's MotionBricks sample clips
+> (evaluation licence). The targets, clips, transition bank and joint limits have since been rebuilt from freely
+> licensed motion capture only (see "Motion data"). The rebuilt page was checked for every move in headless
+> Chromium (walk 1.4, run 3.4, sprint 5.5 m/s, crouch, jump, duck, dodge, fighting, sit and stand up) and with
+> `build/test/sim.html` (no failures, NaN frames or spikes); the per-metric tables were not re-measured.
 
 ## Controls
 
@@ -15,24 +21,26 @@ runtime in `runtime/somart/`, checked against it to float precision (`build/test
 |---|---|---|
 | Left joystick (push far to run) | `WASD` / arrow keys | Move (camera-relative) |
 | Hold Sprint | `Shift` | Sprint |
-| | `Z` | Walk |
+| | `Z` | Walk / run toggle |
 | Crouch button | `C` | Crouch / stand |
 | Jump button | `Space` | Jump |
 | Dodge button | `F` | Dodge (quick side-step) |
 | Duck button | `X` | Duck |
 | Sit button | `E` | Sit on a chair / stand up |
+| Punch, Kick, Block | `J`, `K`, `L` | Fighting |
 | Drag the scene | Drag, mouse wheel | Orbit the camera (desktop: wheel zooms) |
 
 ## Model and settings
 
 | Model | Network | Download (cached after the first visit) |
 |---|---|---|
-| Balanced | INT8 pose transformer; other weights stored as int8 per channel, computed in FP32 | 193 MB |
+| Balanced | INT8 pose transformer; matrix weights stored as ggml Q5_0 in a split GGUF (12 shards), computed in INT8 | 150 MB |
 
-Built from `models/soma/optimized/onnx/soma_int8_pose.onnx` by `tools/build_web_models.py`. The
-float MatMul/Conv weights are stored as int8 with one scale per output channel and expanded back
-to float32 when the model loads, so the arithmetic is unchanged. Held-out eval set (187 windows):
-joint error 7.10 cm vs 7.08 cm for the source model, foot slide 11.1 vs 10.6 cm/s.
+Built from `models/soma/optimized/onnx/soma_int8_pose.onnx` by `tools/build_web_models.py` and packed by
+`tools/gguf/build_gguf.py`: the INT8 weights of the matrix multiplies are re-coded as Q5_0 blocks (5.5 bits per
+weight) and decoded back onto the INT8 grid when the page loads (`js/gguf.js`), so the runtime graph, speed and
+memory are those of the INT8 model. Held-out eval set (187 windows): joint error 7.07 cm vs 7.10 cm for the INT8
+file (Q4_0 would be 7.27 cm).
 
 Earlier versions also offered **Light (INT4)**. It was removed: in the browser its 4-bit kernels
 are about 3x slower than INT8 on one WebAssembly thread (0.75-1.2 s vs 0.23-0.31 s per generation
@@ -103,7 +111,7 @@ travel 0.48 / 0.59 m and elbow range 48-54 deg (before: 0.28 / 0.21 m, 19-20 deg
 Recorded frame by frame (`SOMA_DEBUG.step(dt)` advances the game exactly one frame), starting to jog used
 to play a sprinter's block start: the torso pitched up to 50 deg forward with the arms hanging, for about
 half a second; some 180 deg reversals flipped the body through one frame. Both came from the transition
-bank, and both are fixed (`build/test/startlab.html` reproduces the experiments):
+bank, and both are fixed:
 
 - **Cause of the lunge**: each bank start or turn was one 16-token (1.9 s) request. Given that much time,
   the SOMA network plans a block start, even with every post pass off (torso pitch 38-54 deg idle to run,
@@ -171,44 +179,37 @@ Joint-speed p99 is unchanged (13.8 vs 14.2 rad/s); with 300 ms extra generation 
 still no freezes, lurches or failures. The mocap has no real sidestep or backpedal clips, so the character
 always faces where it runs (no strafing).
 
-## Real walking (100STYLE motion capture)
+## Motion data (freely licensed motion capture)
 
-Walking targets also come from real human motion capture: the **100STYLE** dataset (Mason, Starke and
-Komura, CC BY 4.0), one performer walking, jogging, idling, starting and stopping in many styles. The SOMA
-network still generates every frame; the capture only decides where each segment should end up.
+The network generates every frame; motion capture only decides where each segment should end up (targets), and
+seeds the instant-transition bank. All of it is free to redistribute:
 
-- `tools/mocap/style100.py fetch` downloads just the files used (about 120 MB of a 1.5 GB zip, via HTTP
-  range requests); `retarget` maps them onto the SOMA rig: the SOMA bind pose (an A-pose) is swung onto the
-  performer's T-pose bone by bone, feet and toes stay flat, the pelvis follows the performer's hip sockets
-  scaled by leg length (0.984), and each clip is lowered so the standing foot is at the same height as in the
-  NVIDIA clips. Bone directions agree within 1 deg; stance-foot pitch 21-23 deg vs 19 deg in NVIDIA walks;
-  pelvis height within 1 cm at the same speed (`check`, `tests/test_style100.py`).
-- The default library adds 5 minutes of neutral walking, a slow jog, idling and starts/stops (31 clips, 3.5 MB).
-- **Gait-aware matching** (`js/library.js`): each candidate is labelled walk or jog from its stride period
-  (walks take 31-52 frames, jogs 15-29); walking prefers walking strides and running prefers running ones.
-  Walk and jog overlap in speed (both libraries have jogs at 0.8-2 m/s), so this was ambiguous before.
-- **Walk style** (Settings): Natural, Proud, Strutting, Rushed, Sad, Elderly or Hands behind back. Each style
-  file (1.3-2 MB) is downloaded only when chosen; its clips win wherever they cover the requested speed, and
-  the character walks at the style's own pace (0.35 m/s for Elderly up to 1.95 m/s for Rushed). Running and
-  sprinting stay on the default library. Elated was dropped after looking at it on SOMA (an exaggerated
-  crouched bounce); styles with hands in pockets would sink the hands into the unclothed mesh.
-
-Measured with `build/test/sim.html?script=walk` (walking, turns, a half-pushed stick, stop, jog start),
-3 runs each, NVIDIA clips only vs with 100STYLE:
-
-| | NVIDIA only | + 100STYLE |
+| Source | Licence | Used for |
 |---|---|---|
-| toe slide while on the ground, median | 0.099 m/s | 0.085 m/s |
-| ... 90th percentile | 1.79 m/s | 1.51 m/s |
-| ground frames sliding > 0.2 m/s | 37 % | 33 % |
-| stop from walking | 0.17-0.24 s | 0.04-0.05 s |
-| slow walk (half stick) reached | 0.09-0.42 s | 0.11-0.12 s |
-| joint speed p99 | 11.7 rad/s | 12.1 rad/s |
+| **100STYLE** (Mason, Starke, Komura 2022) | CC BY 4.0 | walking forward/backward/sideways, slow jogs, idle, starts and stops; the six walk styles |
+| **CMU Motion Capture Database** | free for all uses | running 2-4.5 m/s with turns and sudden stops (subjects 9, 16, 35), crouch walking and sneaking (136, 139), jump (16_01), sit and stand up (143_18), duck (77_09), side-step dodge (127_13) |
 
-On the running script nothing changed beyond noise, except walk-to-sprint, which became about 0.1 s slower
-(0.24 -> 0.34 s): from the new walking pose the transition bank picks a 90 deg entry for a 45 deg change.
-No NaNs, failures, lurches or freezes in any run, also with 450 ms of added delay. Building the library
-takes 159 ms here (73 ms before); one target search 0.8 ms (0.3 ms before).
+- `tools/mocap/style100.py fetch` range-downloads just the files used from the 1.5 GB zip; `tools/mocap/cmu.py fetch`
+  downloads the listed ASF/AMC trials (14 MB). `retarget` maps them onto the SOMA rig: the bind pose (an A-pose) is
+  swung onto each source's rest pose bone by bone, joint world rotations are copied, feet stay flat, the pelvis follows
+  the performer's hip sockets scaled by leg length, each clip is lowered so the standing foot is at the rig's stance
+  height, and the arms are re-solved with two-bone IK so the elbows bend about the network's own hinge axis
+  (`tools/fit_hinges.py`, measured on its raw output; the source rigs' elbow axes are 16-30 deg off it). Bone
+  directions agree within 2-3 deg (`tests/test_style100.py`, `tests/test_cmu.py`).
+- `tools/export_web_data.py` builds the clips (58, 16k frames, 4 MB), 782 target windows, the 8 action key poses
+  and the joint limits; `build/tools/gen_bank.cjs` regenerates the transition bank (166 entries, all SOMA output).
+- **Gait-aware matching** (`js/library.js`): jog and run clips are tagged as running and crouch clips as crouching;
+  other candidates are labelled walk or jog from their stride period. Walking never targets a jog (100STYLE's walks
+  top out near 1 m/s, its slow jogs reach 1.7 m/s), and crouching is a tag, not a pelvis height (a crouch walk's pelvis
+  is ~0.85 m because the torso leans).
+- **Walk style** (Settings): Natural, Proud, Strutting, Rushed, Sad, Elderly or Hands behind back. Each style file
+  (1.3-2 MB) is downloaded only when chosen; the character walks at the style's own pace (0.35 m/s for Elderly up to
+  1.95 m/s for Rushed). Running and sprinting stay on the default library.
+- **Joint limits**: knees, elbows and toes are hinges about the network's axes, with ranges covering the clips, the
+  network's output and normal clinical range of motion; joints the retargeters do not drive stay at the rig's
+  reference; the relaxed hand pose is authored (the captures have no finger motion).
+- Gaps: sprinting (5.5 m/s) is faster than any capture (4.5 m/s), so the network extrapolates; the crouch is one
+  performer's moderate crouch, with no deep crouch walk.
 
 ## Upper body and hands
 
@@ -245,104 +246,6 @@ arm, chambered and extended leg, forearms up) that the SOMA network moves into f
 motion and back out of to the stance; from standing (and jab / cross / front kick from walking)
 they are in the instant-transition bank, otherwise they are generated live.
 
-## Animals (trained network, realistic models)
-
-Settings, Character: Dog, Wolf, Fox, Cat, Horse, Brown bear, Elephant, Tiger, Jaguar, Rabbit (or "Play an
-animal" on the start screen; each model is 0.2-1.9 MB and loads when first picked). The SOMA network only knows
-human motion and was released without training code, so the animals have their own network, trained here from
-scratch, driving realistic skinned 3D models:
-
-- **Data**: 41 minutes of dog motion capture from Zhang, Starke, Komura and Saito, "Mode-Adaptive
-  Neural Networks for Quadruped Motion Control" (SIGGRAPH 2018), CC BY-NC 4.0 (non-commercial use
-  only). 51 clips at 60 fps, mirrored left/right; about 3 minutes where the dog stands on a raised
-  surface are dropped. Three actions are labelled automatically from the posture: lying down, leaping
-  (flight phases at speed) and rearing up on the hind legs (about 4 minutes of the data).
-- **Model** (`tools/animal/train_mann.py`): a gating network blends 4 expert MLPs (2 hidden layers
-  of 256) per frame. Input: 1 s of past path, 1 s of future path (the network's own prediction
-  blended with the player's joystick) with the action labels, the current joint positions and
-  velocities. Output: the next pose, root motion, the future path and paw contacts. 0.77 M weights,
-  1.5 MB as float16; trained for 100 epochs (16 minutes) on 253,336 samples on this machine's CPU;
-  validation loss 0.24 on 5 held-out clips (training loss 0.08).
-- **One model file**: both networks ship as one GGUF model, split like llama.cpp's `gguf-split` into 13 shards of
-  at most 14 MB (`models/balanced/motionbricks-000NN-of-00013.gguf`, `tools/gguf/build_gguf.py`, read by `js/gguf.js`).
-  Shard 1 (1.6 MB) holds the animal network and the metadata, so the animal mode downloads only that shard. GGUF is
-  the ggml / llama.cpp container; llama.cpp cannot run these networks, the browser does.
-- **Runtime** (`js/animalnet.js`): evaluated every frame in a WebAssembly SIMD kernel (0.2 ms; plain
-  JavaScript fallback; matches PyTorch to 1e-6), bone lengths kept. Paws the network marks as in contact stay planted (up to
-  10 cm of lag before they slide, never beyond the leg's reach).
-- **Bodies** (`js/animalmesh.js`): Creative Commons models from Sketchfab, taken from the Objaverse
-  mirror on Hugging Face and packed with `tools/animal/pack_models.py` (animations removed, textures at
-  most 1024 px; credits in the settings panel and `NOTICE`). Each model gets a small bone map (pelvis,
-  spine, neck, head, four legs, tail). Every frame each mapped bone is turned rigidly so its part of the
-  body lines up with the network's joints (the body's left axis fixes the twist); the spine and tail bend
-  progressively; a two-bone IK puts every paw exactly on the network's planted paw. The network's legs are
-  scaled to each model's leg lengths and the body is pitched so front and hind paws stand level. Bones the
-  map does not name (ears, jaw, toes, trunk, mane) follow their parents. Network plus bone update: about
-  1.5 ms per frame.
-- **Measured** (`build/test/animal_sim.html`, dog; `&model=1` includes the bone update): frame-to-frame
-  joint acceleration of the network output is at or below the real mocap's in every gait (walk 1.7 vs
-  2.5 mm/frame², trot 5.3 vs 5.5, gallop 6.7 vs 7.6), so the motion is as smooth as the recording.
-  Planted paws slide 0.15 m/s while moving (the recording: 0.10 m/s; before planting: 0.38 m/s).
-- **Other species** move with the dog-trained motion on their own body proportions and are time-scaled
-  by size (larger animals step more slowly). Per-species styles sit on top (`style` in `js/animalmesh.js`):
-  rabbits bound with each pair of legs together, elephants never gallop and move slower, bears are slower,
-  cats and foxes step quicker, horses run faster. Planted paws keep their toes at the standing angle.
-  Bigger animals get straighter legs (`legReach`: the network's legs are 5-10% longer than the model's,
-  so the model's legs extend more), the horse keeps its cannon bones near vertical (`metaStiff`) and
-  carries its head 25 deg higher than a dog (`headLift`).
-- **Bigger is not better here**: a 6-expert, 320-unit network trained for 150 epochs reached a lower
-  validation loss (0.221 vs 0.242) but drove worse in closed loop (stops 4x slower, more paw sliding,
-  jerkier trot, twice the cost), so it was not shipped. A run with noise on the input pose
-  (`--noise 0.1 --keep-best`) was worse still (walk too fast, horse never fully lay down, 4x paw sliding).
-- **Rig fixes** (audit: `build/test/animal_rig.html`, `bind_check.html`, frame-exact captures with `SOMA_DEBUG.step`):
-  - *Reference pose = the skin's bind pose.* The node pose stored in each file is whatever frame the author
-    exported: a fox lying curled with its head on the ground, a galloping horse, mid-stride cats. Rest
-    directions, twists and toe angles were measured on it, so the fox's head pointed at the ground and paws
-    turned sideways. The driven chains (and toes) are now put in the bind pose, rebuilt from the inverse bind
-    matrices joint by joint (independent of each file's units and axes), and stood upright. Skin in the
-    reference pose is now undeformed (edge-length spread 1.00-1.06; it was up to 1.64). Faces, ears and manes
-    keep the authored expression.
-  - *Paws*: a planted paw stands flat in its bind orientation turned to the body's heading; a lifted paw
-    flexes like the network's, at most 100 deg and without twist; the leg IK reaches the wrist that puts the
-    toe tip on the network's contact point. (Before, the paw bone was aimed at the toe tip with a minimal
-    rotation, which tipped paws 80-140 deg and twisted them 20-60 deg.)
-  - *No candy-wrapper*: limb bones twist at most 12 deg about their own axis, the head rolls at most 10 deg.
-  - *Misparented helpers*: skin bones that sit on a driven joint but hang off another bone (the horse's hip
-    bone on the second spine bone) follow the joint they sit on.
-  - Dual-quaternion skinning was measured (CPU) and did not reduce skin stretch on these models, so the
-    meshes keep three.js linear blend skinning.
-- **Feet on the ground**: the network plants its toe-tip joint, but each model's sole sits a different distance
-  from that joint (the fox's toe-end bones even reach below its paws). Each paw's lowest skin points (48 per paw)
-  are skinned every frame and a per-paw correction keeps a planted sole at the ground; a leg that cannot reach
-  lowers the body (up to 12 % of hip height) until every planted leg has slack again. Planted soles, median over
-  the rollout: 0.0 % of hip height for every species (before: up to 12-15 % floating: fox, rabbit, tiger, bear,
-  wolf hind feet; or 2-4 % sunk: elephant and fox hind feet).
-- **Rabbit legs**: the bounding gait copied the left legs onto the right ones, so each pair overlapped into one
-  leg from the side. The right legs now replay the left legs 67 ms (front) and 33 ms (hind) later, as rabbits land.
-- **Head and neck**: limited relative to the chest (head: yaw +-40 deg, nose 30 deg up to 50 deg down, roll +-10;
-  neck less) and smoothed (80 ms). Head turning relative to the chest: p99 290-520 -> 130-270 deg/s.
-- **Muscles, breathing, soft tissue**: a vertex-shader layer on each animal mesh (per-bone displacement along
-  the normal, from a small float texture): loaded legs bulge (more when the joint below is flexed), the chest
-  breathes 0.35 times a second at rest up to ~2.2 when sprinting (panting), and the belly rides the body's
-  bounce on a 3.2 Hz spring. Up to ~1 cm on a dog; follows the "Muscles, breathing and soft tissue" setting.
-- **Response and stability**: the network's inputs are kept within 8 standard deviations of its training
-  data. Before, harsh input (180 deg reversals, direction changes every 0.4 s; `animal_sim.html?stress=1`)
-  made every species except the horse diverge, even with the original settings. With that guard the
-  player's path steers the network much harder (`RESPONSE` in `js/animalnet.js`):
-
-  | 90 deg turn / stop | Before | Now |
-  |---|---|---|
-  | dog | 0.7-1.4 s / 1.17 s | 0.5 s / 0.82 s |
-  | cat, fox, rabbit | 0.6-0.9 s / 0.6 s | 0.23-0.38 s / 0.33-0.5 s |
-  | horse | 1.6-2.5 s / 1.8 s | 0.83-0.95 s / 1.08 s |
-  | elephant | 1.5-2.4 s / did not stop in 2 s | 0.85-1.02 s / 1.23 s |
-
-  Sprint speeds are unchanged; paw sliding while moving is within about +/-25 % of before per species.
-- Controls: move, Sprint (fast gait), Jump (leap), Punch / Kick (pounce), Dodge (side jump),
-  Block (rear up; from a run the animal pulls up first), Duck or Sit (lie down / get up). The
-  elephant rears instead of jumping. Settings can switch back to the earlier procedural animation
-  (simple shapes).
-
 ## Slow devices (phones)
 
 - **No catch-up lurches**: targets are predicted from the animation's own momentum, never from a
@@ -360,20 +263,13 @@ scratch, driving realistic skinned 3D models:
 
 ## Phones and old PCs
 
-- **Animal network in WebAssembly SIMD**: the expert-blended layers run in a 400-byte SIMD kernel
-  (`build/tools/mix_simd.wat`, embedded in `js/animalnet.js`): 0.19 ms per step instead of 1.32 ms
-  (6.9x), outputs equal to the JS path within 1e-6, identical rollout metrics. Browsers without SIMD
-  use the JS path. Main-thread cost of an animal: 5.3 -> 1.6 ms per frame here.
 - **Adaptive quality** (Settings, on by default): when the frame rate stays below 40 fps the resolution,
   then the shadow quality, then the shadows step down (4 levels, "lite n" in the fps chip); above
   57 fps they step back up, one change per 4-8 s. On this machine's software renderer (a stand-in
   for a weak GPU): 12 -> 23-27 fps.
-- Human: the controller costs 1.2-1.4 ms per frame on the main thread; the SOMA network runs in a
+- The controller costs 1.2-1.4 ms per frame on the main thread; the SOMA network runs in a
   worker (0.19 s per generation with 4 threads here, about 4 generations per second while moving,
   1.5 when idle). Slow devices get fewer, longer generations automatically (one request in flight).
-- The human and animal networks are one model file (split GGUF) but never run at the same time, so
-  fusing their computation would not lower the CPU load; it would make animal-only play download and
-  start the 152 MB human network.
 
 ## Performance (measured here, not on phones)
 
@@ -384,96 +280,84 @@ scratch, driving realistic skinned 3D models:
 
 No phone was available to test. A recent phone is likely 2-3x slower per thread than this machine,
 i.e. about 0.5-0.8 s per generation on one thread (claude.ai copy) and less with threads (GitHub
-Pages). The first visit downloads 193 MB.
+Pages). The first visit downloads 150 MB.
 
 ## Run locally
 
 ```bash
-cd site/build && npm install            # onnxruntime-web, three, coi-serviceworker (dev only)
-node serve.mjs 8123 --isolate           # COOP/COEP headers -> multi-threaded WASM
-# open http://localhost:8123/
+node site/build/serve.mjs 8123 --isolate   # COOP/COEP headers -> multi-threaded WASM; open http://localhost:8123/
 ```
 
 Rebuild the generated pieces when their sources change:
 
 ```bash
-python3 tools/build_web_models.py       # site/models/  (needs models/soma/optimized/onnx/)
-python3 tools/export_web_data.py        # site/data/    (needs third_party/ sample clips)
-node site/build/tools/gen_bank.cjs 8124 # site/data/bank.* (with `node site/build/serve.mjs 8124 --isolate`)
-python3 site/build/make_index.py        # site/index.html from index.src.html
+python3 tools/build_web_models.py && python3 tools/gguf/build_gguf.py   # site/models/ (needs models/soma/optimized/onnx/)
+python3 -I tools/mocap/style100.py fetch && python3 -I tools/mocap/style100.py retarget
+python3 -I tools/mocap/cmu.py fetch && python3 -I tools/mocap/cmu.py retarget
+python3 tools/export_web_data.py                                        # site/data/
+node site/build/tools/gen_bank.cjs 8123                                 # site/data/bank.* (dev server running)
+python3 site/build/make_index.py                                        # site/index.html from index.src.html
 ```
+
+`site/build/package.json` pins the vendored libraries (`npm install` there, then copy into `vendor/`).
 
 ## Deploy to GitHub Pages
 
-`.github/workflows/pages.yml` publishes `site/` (without `build/`) on every push to this
-branch that touches `site/`, once Pages is enabled:
+`.github/workflows/pages.yml` publishes `site/` (without `build/`) on every push to `main` or the development
+branch that touches `site/`, once Pages is enabled. It checks the model shards against `models/models.json` first.
 
 1. Settings, Pages, Build and deployment, Source: **GitHub Actions**.
 2. Actions, **Deploy SOMA Playground**, **Run workflow** (or push a change under `site/`).
 3. The site appears at `https://<owner>.github.io/<repo>/`.
 
-Notes before enabling it:
+Notes:
 
-- GitHub Pages for a private repository needs a paid plan (Pro, Team or Enterprise), and the
-  published site is public unless the organization uses Enterprise Cloud private Pages.
-- `site/data/windows.*`, `clips.*` and `bank.*` are derived from the MotionBricks sample clips, which are under the
-  NVIDIA Sample Data Evaluation License (internal evaluation and testing). Publishing a public
-  site redistributes that derived data. Check that license, or replace the windows with motion
-  you have the rights to (`tools/export_web_data.py` builds them from any SOMA BVH clips),
-  before making the site public.
-- GitHub Pages has a soft limit of 100 GB of traffic per month, roughly 500 first visits.
+- GitHub Pages for a private repository needs a paid plan; the published site is public.
+- The `github-pages` environment only accepts deployments from allowed branches (by default the default branch).
+  Deploy from `main`, or add the branch under Settings, Environments, github-pages.
+- GitHub Pages has a soft limit of 100 GB of traffic per month, roughly 600 first visits (150 MB each).
 - Pages cannot set COOP/COEP headers, so `coi-serviceworker.js` adds them through a service
   worker (one automatic reload on the first visit) to enable multi-threaded WASM. Without it
   the page still works on one thread.
 
-## claude.ai copy
-
-`build/stage_artifact.py` stages a copy for a claude.ai artifact, which accepts
-standard web media types only: the `.bin` parts are copied byte-for-byte under `.wasm` names
-and the page is told so by `<meta name="soma-bin-ext">`. Service workers are not available
-there, so it runs single-threaded.
-
 ## Files
 
 ```
-index.src.html          page source (HUD, controls, panel); make_index.py -> index.html
-js/main.js              scene, input, settings panel, frame loop
+index.src.html          page source (HUD, controls, panel); build/make_index.py -> index.html
+js/main.js              scene, input, settings panel, frame loop, adaptive quality
 js/controller.js        planning, splicing, instant transitions, gait-cycle extension,
                         inertialization, foot locking, fingers, head look-ahead
 js/library.js           continuous mocap clips with stride phase and gait, walk styles (target selection)
 js/bank.js              transition bank + motion-matching features
 js/body.js              muscles, breathing, soft tissue (vertex shader)
 js/fight.js             fighting key poses (IK on the idle pose)
-js/animals.js           species shapes + the earlier procedural animal animation
-js/animalnet.js         trained animal network: JS inference, control loop, paw planting
-js/animalmesh.js        realistic animal models: bone maps, retargeting onto skinned meshes, credits
 js/settings.js          presets and defaults
 js/codec.js             SOMA encode/decode, endpoint correction, velocity matching, joint limits
+js/gguf.js              GGUF reader; rebuilds the ONNX file from the split model
 js/math3d.js            quaternion and pose helpers
 js/worker.js            model download and cache, onnxruntime-web inference
-data/                   skeleton, action windows, clips (30 fps + mirrored; 100STYLE walking),
+data/                   skeleton (SOMA rig), target windows + action poses, clips (100STYLE + CMU),
                         styles/ (optional walk styles, loaded on demand), transition bank,
-                        joint limits, SOMA body mesh; animal/: trained network,
-                        models/*.glb (10 animals, CC licences, see NOTICE)
-models/                 models.json + model parts (14 x 14 MB)
-vendor/                 onnxruntime-web 1.31.1, three.js 0.170.0 + GLTFLoader (MIT, unmodified)
+                        joint limits, SOMA body mesh
+models/                 models.json + the split GGUF model (12 shards, 150 MB)
+vendor/                 onnxruntime-web 1.31.1, three.js 0.170.0 (MIT, unmodified)
 coi-serviceworker.js    COOP/COEP shim for static hosts (MIT)
-build/                  dev server, index builder, artifact stager, parity and timing tests
-                        (test/sim.html + run_sim.cjs; controller_baseline.js is the pre-fix
-                        controller for comparison), bank generator (tools/gen_bank.*) - not deployed
+build/                  dev server, index builder, bank generator (tools/gen_bank.*), controller
+                        simulation (test/sim.html + run_sim.cjs; controller_baseline.js is an older
+                        controller for comparison), lean test - not deployed
 ```
 
 ## Licences and attribution
 
 - MotionBricks SOMA model: licensed by NVIDIA Corporation under the
   [NVIDIA Open Model Agreement](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/).
-  `models/` holds an INT8-quantized derivative of it (int8/FP16 weight storage).
-- SOMA body mesh (`data/soma_mesh.*`): extracted from the upstream MotionBricks asset
-  `soma_base_skel_minimal_no_root.usd`, NVIDIA, CC BY 4.0 (upstream assets licence).
-- Motion windows and clips (`data/windows.*`, `data/clips.*`, mirrored copies included): derived
-  from MotionBricks sample clips, NVIDIA Sample Data Evaluation License.
-- Clips named `100STYLE/*` in `data/clips.*` and everything in `data/styles/`: the 100STYLE dataset by Ian Mason,
-  Sebastian Starke and Taku Komura ([doi:10.5281/zenodo.8127870](https://doi.org/10.5281/zenodo.8127870)),
-  CC BY 4.0, retargeted onto the SOMA rig and resampled to 30 fps by `tools/mocap/style100.py`.
-- Transition bank (`data/bank.*`): SOMA model output conditioned on 4-frame windows of those clips.
+  `models/` holds an INT8-quantized derivative of it.
+- SOMA body mesh and rig (`data/soma_mesh.*`, `data/skeleton.json`): extracted from the upstream MotionBricks asset
+  `soma_base_skel_minimal_no_root.usd`, NVIDIA, CC BY 4.0.
+- Clips named `100STYLE/*` and everything in `data/styles/`: the 100STYLE dataset by Ian Mason, Sebastian Starke and
+  Taku Komura ([doi:10.5281/zenodo.8127870](https://doi.org/10.5281/zenodo.8127870)), CC BY 4.0, retargeted.
+- Clips named `CMU/*`: the data used in this project was obtained from [mocap.cs.cmu.edu](http://mocap.cs.cmu.edu);
+  the database was created with funding from NSF EIA-0196217. Retargeted.
+- Target windows (`data/windows.*`) and joint limits come from those clips; the transition bank (`data/bank.*`) is
+  SOMA model output conditioned on them.
 - onnxruntime-web (Microsoft), three.js, coi-serviceworker: MIT, licence files in `vendor/`.

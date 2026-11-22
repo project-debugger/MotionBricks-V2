@@ -8,7 +8,7 @@ configs/
   default.yaml              complete schema with defaults and comments
   presets/                  ultra_quality | balanced | low_vram | extreme_performance | cpu_only
   custom/                   your profiles (example_heavy_character.yaml)
-  skeletons/                skeleton profiles (soma + animal templates)
+  skeletons/                skeleton profiles (soma; dog/cat/... topology templates), joint limits, hinge axes
 ```
 
 ## Loading, layering, saving
@@ -82,7 +82,7 @@ cfg.skeleton_settings("soma")
 | `skeleton.*`, `skeletons.<name>.*` | rig selection and per-skeleton IK/contacts |
 | `clips.root`, `actions.<name>.*` | clip library and action definitions |
 
-## Presets (measured; see `benchmarks/`)
+## Presets (measured with the earlier benchmark scripts)
 
 | Preset | CPU model | GPU model | Intent |
 |---|---|---|---|

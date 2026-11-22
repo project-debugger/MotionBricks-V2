@@ -69,7 +69,7 @@ What blocks it:
    quantization — see `docs/OPTIMIZATION.md`) with masked-token cross-entropy, low learning rate,
    root model and VQ-VAE frozen. Keep `models/soma/original/` untouched; write to
    `models/soma/finetuned/<name>/` with its own checksums.
-4. Evaluate against the baseline with the *same* harness: `benchmarks/run_benchmarks.py`
+4. Evaluate against the baseline with the same held-out set and metrics (MPJPE, foot slide, join pops)
    (accuracy vs held-out mocap, duration agreement, foot sliding, join smoothness), on a held-out
    split of the new data plus the existing eval set to detect regressions.
 5. Re-run `tools/export_onnx.sh` / `tools/optimize_models.py` on the fine-tuned weights.
