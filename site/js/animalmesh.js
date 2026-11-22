@@ -12,6 +12,8 @@ const K = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 const DOG_HIP = 0.469, DOG_HIND = 0.448; // network rest: Hips height, hind leg chain (UpLeg..FootEnd)
 const PAW_FLEX = 100 * Math.PI / 180, HIND_PLANT = 0.5; // lifted paws flex at most 100 deg; planted hind feet half-flat (the heel lifts)
 const TWIST_MAX = 12 * Math.PI / 180, HEAD_ROLL_MAX = 10 * Math.PI / 180;
+// head and neck relative to the chest (degrees) and the smoothing time constant (s)
+const HEAD_LIMIT = { yaw: 40, up: 30, down: 50, roll: 10 }, NECK_LIMIT = { yaw: 25, up: 25, down: 40, roll: 6 }, LOOK_SMOOTH = 0.08;
 
 // rig: bone names as written in the GLB (matched case- and punctuation-insensitively)
 //   root    bone that receives the world translation (topmost driven bone; may be the pelvis itself)
@@ -346,6 +348,24 @@ export class AnimalModel {
     this.pawR = Math.max(0, Math.min(0.06 * cfg.hips, tipY - (Number.isFinite(lowest) ? lowest : tipY)));
     this.tmp = { q: new T.Quaternion(), q2: new T.Quaternion(), m: new T.Matrix4(), m2: new T.Matrix4(), v: new T.Vector3(), v2: new T.Vector3() };
     this.body = new AnimalBodyFX(T, gltf.scene, this);
+    // soles: how far below each toe-tip joint the paw's skin reaches in the flat reference pose (so a planted paw's
+    // sole, not its tip joint, meets the ground)
+    const vtx = new T.Vector3();
+    for (const l of [this.front.L, this.front.R, this.hind.L, this.hind.R]) {
+      const bones = l.bones.filter(Boolean), under = new Set(); bones[bones.length - 1].traverse((o) => under.add(o));
+      let lo = Infinity; const cand = [];
+      gltf.scene.traverse((o) => { if (!o.isSkinnedMesh) return; const si = o.geometry.attributes.skinIndex, sw = o.geometry.attributes.skinWeight, n = o.geometry.attributes.position.count;
+        for (let i = 0; i < n; i++) { let w = 0; for (let k = 0; k < 4; k++) if (under.has(o.skeleton.bones[si.getComponent(i, k)])) w += sw.getComponent(i, k);
+          if (w > 0.6) { o.getVertexPosition(i, vtx).applyMatrix4(o.matrixWorld); cand.push([vtx.y, o, i]); if (vtx.y < lo) lo = vtx.y; } } });
+      // the sole can sit above the tip joint (the fox's toe-end bones reach below its paws)
+      l.sole = Number.isFinite(lo) ? Math.max(-0.15 * cfg.hips, Math.min(0.15 * cfg.hips, l.tip0.y - lo)) : 0;
+      // the lowest skin points of the paw in the reference pose, skinned each frame to measure the real sole height
+      cand.sort((a, b) => a[0] - b[0]);
+      l.soleV = cand.slice(0, 48).map(([, o, i]) => { const si = o.geometry.attributes.skinIndex, sw = o.geometry.attributes.skinWeight;
+        return { o, v: new T.Vector3().fromBufferAttribute(o.geometry.attributes.position, i), b: [0, 1, 2, 3].map((k) => si.getComponent(i, k)), w: [0, 1, 2, 3].map((k) => sw.getComponent(i, k)) }; });
+      l.under = bones[bones.length - 1];
+    }
+    this.netPlantY = [null, null, null, null]; this.soleCorr = [0, 0, 0, 0]; this.drop = 0; this.look = {}; this.skinM = new T.Matrix4();
   }
   // leg chain lengths (metres) from the shoulder / hip joint to the toe tip, averaged over both sides; the network's
   // legs are scaled uniformly to these, so its paws are within reach of the model's legs
@@ -362,7 +382,7 @@ export class AnimalModel {
   isAncestor(a, b) { for (let x = b.parent; x; x = x.parent) if (x === a) return true; return false; }
   setWorldQ(o, q) { const pq = this.tmp.q2; o.parent.getWorldQuaternion(pq); o.quaternion.copy(pq.invert().multiply(q)); o.updateWorldMatrix(false, false); }
   // W: network joint positions (world, model proportions), ix: name -> index, rest: { pelvis frame and tail direction at rest }
-  apply(W, ix, rest, contacts) {
+  apply(W, ix, rest, contacts, dt = 1 / 60) {
     const T = this.T, V = (n) => { const i = ix[n] * 3; return new T.Vector3(W[i], W[i + 1], W[i + 2]); };
     const hips = V('Hips'), sp1 = V('Spine1'), neck = V('Neck'), head = V('Head'), headEnd = V('HeadEnd');
     const hindL = V('LeftUpLeg').sub(V('RightUpLeg')).normalize(), frontL = V('LeftShoulder').sub(V('RightShoulder')).normalize();
@@ -408,21 +428,30 @@ export class AnimalModel {
       }
     }
     // world rotations (parents first), then the root's translation so that the pelvis lands on the network's hips
+    // head and neck: limited relative to the chest and smoothed (the dog data looks around fast; on other bodies the
+    // head spun up to 500 deg/s and turned 50-90 deg sideways)
+    const Rn0 = R.get(this.neck[0]), Rh0 = R.get(this.head);
+    if (Rn0) { const Rn1 = this.limitLook(Rn0, Rc, NECK_LIMIT, 'neck', dt); this.neck.forEach((o) => R.set(o, Rn1)); }
+    if (Rh0) R.set(this.head, this.limitLook(Rh0, Rc, HEAD_LIMIT, 'head', dt));
     for (const o of this.driven) { const q = R.get(o); if (q) this.setWorldQ(o, q.clone().multiply(this.restQ.get(o))); }
     this.limitTwist(this.head, HEAD_ROLL_MAX, null, this.nose0.clone().sub(this.restP.get(this.head)));
     const hipNet = V('LeftUpLeg').add(V('RightUpLeg')).multiplyScalar(0.5), hipModel = this.hind.L.bones[0].getWorldPosition(new T.Vector3()).add(this.hind.R.bones[0].getWorldPosition(new T.Vector3())).multiplyScalar(0.5);
-    const rootTo = this.root.getWorldPosition(new T.Vector3()).add(hipNet.sub(hipModel));
+    const rootTo = this.root.getWorldPosition(new T.Vector3()).add(hipNet.sub(hipModel)); rootTo.y -= this.drop; // legs that cannot reach the ground lower the body
     this.root.position.copy(this.root.parent.worldToLocal(rootTo)); this.root.updateMatrixWorld(true);
     // Paws: a planted paw stands flat in its bind orientation, turned to the body's heading; a lifted paw flexes as the
     // network's does (wrist -> toe tip direction), at most PAW_FLEX from flat and without twist. The two-bone IK then
     // puts the wrist / ankle where that paw reaches the network's toe tip. (Aiming the paw bone at the tip with a
     // minimal rotation bent paws 80-140 deg and twisted them 20-60 deg, because rigs and network split paws differently.)
     const yawOf = (Rq) => { const f = new T.Vector3(0, 0, 1).applyQuaternion(Rq); return new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 1, 0), Math.atan2(f.x, f.z)); };
-    const yawF = yawOf(Rc), yawH = yawOf(Rp);
+    const yawF = yawOf(Rc), yawH = yawOf(Rp); let need = 0, slack = Infinity; const planted = [];
     for (const [kind, s, S] of limbs) {
       const l = this[kind][s], b = kind === 'front' ? l.bones.slice(1) : l.bones, [u, m, e] = b;
       const tipT = V(kind === 'front' ? `${S}HandEnd` : `${S}FootEnd`), wristN = V(kind === 'front' ? `${S}Hand` : `${S}Foot`);
-      const c = contacts ? contacts[limbs.findIndex((x) => x[0] === kind && x[1] === s)] : 0, w = Math.max(0, Math.min(1, (c - 0.3) / 0.4));
+      const li = limbs.findIndex((x) => x[0] === kind && x[1] === s), c = contacts ? contacts[li] : 0, w = Math.max(0, Math.min(1, (c - 0.3) / 0.4));
+      // the network plants its toe tip at its own height; shift so this model's sole touches the ground when planted
+      if (w > 0.9) this.netPlantY[li] = this.netPlantY[li] === null ? tipT.y : this.netPlantY[li] + (tipT.y - this.netPlantY[li]) * Math.min(1, dt / 0.25);
+      const plantY = this.netPlantY[li] ?? tipT.y;
+      tipT.y += l.sole - plantY + w * (plantY - tipT.y) + this.soleCorr[li]; // planted: sole on the ground; lifted: the network's lift
       let target = tipT, Qpaw = null;
       if (e) {
         const metaDir = tipT.clone().sub(wristN).normalize(), stiff = this.cfg.style?.metaStiff || 0;
@@ -438,6 +467,8 @@ export class AnimalModel {
       const C = e ? e.getWorldPosition(new T.Vector3()) : this.tipNow(l, m);
       this.twoBone(u, m, A, Kn, C, target);
       if (Qpaw) this.setWorldQ(e, Qpaw);
+      if (w > 0.5) { const l1 = Kn.distanceTo(A), l2 = C.distanceTo(Kn), d = target.distanceTo(A) - 0.98 * (l1 + l2); need = Math.max(need, d); slack = Math.min(slack, -d); }
+      planted.push([l, li, w]);
       // no candy-wrapper: limb bones twist at most TWIST_MAX about their own axis (children keep their world rotation)
       this.limitTwist(u, TWIST_MAX, m); this.limitTwist(m, TWIST_MAX, e || null);
       // planted paw: toes back at their standing angle (the paw presses flat instead of pivoting as one block)
@@ -451,6 +482,31 @@ export class AnimalModel {
       }
     }
     this.applyFollowers();
+    // planted paws the legs cannot reach lower the body; slack in every planted leg lets it rise again (next frame)
+    const dropT = Math.max(0, Math.min(0.12 * this.hips, this.drop + (need > 0 ? need : Number.isFinite(slack) ? -slack : -this.drop)));
+    this.drop += (dropT - this.drop) * Math.min(1, dt / 0.15);
+    // real sole height of each planted paw (its lowest skin points): integrate it out of the paw's target
+    for (const [l, li, w] of planted) {
+      if (!l.soleV.length) continue;
+      l.under.updateMatrixWorld(true);
+      let lo = Infinity; const v = new this.T.Vector3();
+      for (const sv of l.soleV) {
+        const out = new this.T.Vector3(), bones = sv.o.skeleton.bones, inv = sv.o.skeleton.boneInverses;
+        for (let k = 0; k < 4; k++) { if (sv.w[k] <= 0) continue; this.skinM.multiplyMatrices(bones[sv.b[k]].matrixWorld, inv[sv.b[k]]).multiply(sv.o.bindMatrix); out.addScaledVector(v.copy(sv.v).applyMatrix4(this.skinM), sv.w[k]); }
+        if (out.y < lo) lo = out.y;
+      }
+      this.soleCorr[li] = Math.max(-0.15 * this.hips, Math.min(0.15 * this.hips, this.soleCorr[li] - lo * w * Math.min(1, dt / 0.08)));
+    }
+  }
+  // rotation Rw (world, from rest) of the neck or head limited relative to the chest rotation Rc: yaw, pitch (positive =
+  // nose down) and roll in the upright rest frame, then smoothed toward the limited target
+  limitLook(Rw, Rc, lim, key, dt) {
+    const T = this.T, rel = Rc.clone().invert().multiply(Rw), e = new T.Euler().setFromQuaternion(rel, 'YXZ'), r = Math.PI / 180;
+    e.y = Math.max(-lim.yaw * r, Math.min(lim.yaw * r, e.y)); e.x = Math.max(-lim.up * r, Math.min(lim.down * r, e.x)); e.z = Math.max(-lim.roll * r, Math.min(lim.roll * r, e.z));
+    const tgt = new T.Quaternion().setFromEuler(e), prev = this.look[key];
+    const q = prev ? prev.clone().slerp(tgt, 1 - Math.exp(-dt / LOOK_SMOOTH)) : tgt;
+    this.look[key] = q;
+    return Rc.clone().multiply(q);
   }
   // helpers that sit on a driven joint: same world rotation change as that joint, kept on its position
   applyFollowers() {

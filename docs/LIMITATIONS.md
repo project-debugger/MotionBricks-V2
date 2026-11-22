@@ -90,7 +90,8 @@
 - Animal skin still stretches where a dog's range of motion exceeds what a model was skinned for (horse and
   rabbit hips, cat and fox shoulders at a gallop; up to ~2x on the 1 % worst mesh edges). The models' own skin
   weights are used as authored; no muscles are simulated, the muscle layer is a displacement driven by gait.
-  The elephant's front legs can cross briefly when it pivots in place. Faster steering of the animal network
+  The elephant's front legs can cross briefly when it pivots in place, and its hind feet (no separate foot bone)
+  can still sink 1-2 % of hip height when the shin tilts. Faster steering of the animal network
   adds 10-25 % paw sliding while moving for some species.
 - Fighting moves: the key poses are hand-built by IK, the motion into and out of them is SOMA; the
   model was not trained on fighting, so strikes are less crisp than captured martial arts.

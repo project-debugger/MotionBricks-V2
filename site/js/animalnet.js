@@ -114,6 +114,7 @@ export class DogNet {
 // (build/test/animal_sim.html), before (0.22 s, 7/s, 0.1) -> now: 90 deg turns dog 0.7-1.4 -> 0.48-0.62 s, horse
 // 1.6-2.5 -> 0.83-0.93 s, elephant 1.5-2.4 -> 1.05-1.23 s; stops dog 1.17 -> 0.57 s, horse 1.8 -> 1.08 s (the elephant
 // did not stop within 2 s). Stable under ?stress=1 for every species thanks to the input clamp (Z_MAX).
+const BOUND_LAG = [4, 2]; // 60 Hz steps: front paws land ~67 ms apart, hind feet ~33 ms (real rabbits: staggered front, near-paired hind)
 export const RESPONSE = { pathHalfLife: 0.08, yawRate: 20, nearWeight: 0.7 };
 const DOG_SPEED = { walk: 0.9, run: 2.0, sprint: 3.6, crouch: 0.6 }; // m/s in the dog's own scale
 const DOG_HIP = 0.469;
@@ -196,6 +197,7 @@ export class NeuralAnimal {
     this.hist = []; for (let k = 0; k < 61; k++) this.hist.push({ x, z, yaw, vx: 0, vz: 0, lab: new Array(this.nL).fill(0) });
     this.future = m.future.map((o) => ({ x: x + Math.sin(yaw) * 0, z, dx: Math.sin(yaw), dz: Math.cos(yaw), vx: 0, vz: 0 }));
     this.contacts = [1, 1, 1, 1]; this.pawC = this.contacts; this.acc = 0; this.lie = 0; this.jumpAt = -10; this.clock = 0;
+    this.poseHist = []; this.contactHist = []; // bounding gait: the right legs replay the left legs a few steps later
     this.ground = 0; this.speed = 0;
     this.locks = [0, 1, 2, 3].map(() => ({ on: false, p: null, w: 0, off: [0, 0, 0] }));
     this.world = this.toWorldPose(); this.prevWorld = this.world;
@@ -315,7 +317,11 @@ export class NeuralAnimal {
       return { x: this.pos[0] + wx, z: this.pos[1] + wz, dx: dx / dn, dz: dz / dn, vx: wvx2, vz: wvz2 };
     });
     this.contacts = [Y[r++], Y[r++], Y[r++], Y[r++]];
-    this.pawC = this.style.bound ? [this.contacts[0], this.contacts[0], this.contacts[2], this.contacts[2]] : this.contacts;
+    if (this.style.bound) { // hopping: the right legs land BOUND_LAG steps after the left ones (front pair more staggered)
+      this.contactHist.push(this.contacts.slice()); if (this.contactHist.length > 8) this.contactHist.shift();
+      const ago = (n) => this.contactHist[Math.max(0, this.contactHist.length - 1 - n)];
+      this.pawC = [this.contacts[0], ago(BOUND_LAG[0])[0], this.contacts[2], ago(BOUND_LAG[1])[2]];
+    } else this.pawC = this.contacts;
     // pose: average of the predicted pose and the previous pose advanced by the predicted velocity
     const prevW = this.toWorldPoseRaw(this.pose, oldPos, oldYaw);
     for (let j = 0; j < P; j++) {
@@ -332,6 +338,7 @@ export class NeuralAnimal {
       nP[j * 3] = nP[p * 3] + dx / d * L; nP[j * 3 + 1] = nP[p * 3 + 1] + dy / d * L; nP[j * 3 + 2] = nP[p * 3 + 2] + dz / d * L;
     }
     this.pose = nP; this.vel = nV;
+    if (this.style.bound) { this.poseHist.push(nP.slice()); if (this.poseHist.length > 8) this.poseHist.shift(); }
     this.hist.push({ x: this.pos[0], z: this.pos[1], yaw: this.yaw, vx: wvx, vz: wvz, lab: labelsAt(0) });
     if (this.hist.length > 61) this.hist.shift();
     this.speed = Math.hypot(wvx, wvz) * this.timeScale * this.scale; // world m/s (dog units x size, Froude-slowed time)
@@ -351,14 +358,18 @@ export class NeuralAnimal {
       const p = this.parents[j], dx = pose[j * 3] - pose[p * 3], dy = pose[j * 3 + 1] - pose[p * 3 + 1], dz = pose[j * 3 + 2] - pose[p * 3 + 2], k = S * this.boneK[j];
       lp[j * 3] = lp[p * 3] + dx * k; lp[j * 3 + 1] = lp[p * 3 + 1] + dy * k; lp[j * 3 + 2] = lp[p * 3 + 2] + dz * k;
     }
-    if (this.style.bound) { // hopping gait: each pair of legs moves together, the left leg leading
-      for (const [root, chain] of [['Arm', ['ForeArm', 'Hand', 'HandEnd']], ['UpLeg', ['Leg', 'Foot', 'FootEnd']]]) {
-        const lr = this.ix['Left' + root] * 3, rr = this.ix['Right' + root] * 3;
+    if (this.style.bound) { // hopping gait: each pair of legs moves together, the right leg BOUND_LAG steps behind the left
+      [['Arm', ['ForeArm', 'Hand', 'HandEnd'], BOUND_LAG[0]], ['UpLeg', ['Leg', 'Foot', 'FootEnd'], BOUND_LAG[1]]].forEach(([root, chain, lag]) => {
+        const H = this.poseHist || [], src = H.length ? H[Math.max(0, H.length - 1 - lag)] : pose, lr = this.ix['Left' + root], rr = this.ix['Right' + root] * 3;
+        let prev = lr;
         for (const n of chain) {
-          const l = this.ix['Left' + n] * 3, r = this.ix['Right' + n] * 3;
-          lp[r] = lp[rr] - (lp[l] - lp[lr]); lp[r + 1] = lp[rr + 1] + (lp[l + 1] - lp[lr + 1]); lp[r + 2] = lp[rr + 2] + (lp[l + 2] - lp[lr + 2]);
+          const l = this.ix['Left' + n], r = this.ix['Right' + n] * 3, pl = this.parents[l], k = S * this.boneK[l];
+          // the delayed left segment, mirrored across the body (x), hung from the right joint above it
+          const dx = (src[l * 3] - src[pl * 3]) * k, dy = (src[l * 3 + 1] - src[pl * 3 + 1]) * k, dz = (src[l * 3 + 2] - src[pl * 3 + 2]) * k;
+          const rp = prev === lr ? rr : this.ix['Right' + chain[chain.indexOf(n) - 1]] * 3;
+          lp[r] = lp[rp] - dx; lp[r + 1] = lp[rp + 1] + dy; lp[r + 2] = lp[rp + 2] + dz; prev = l;
         }
-      }
+      });
     }
     if (this.pitch) {
       const c = Math.cos(this.pitch), s = Math.sin(this.pitch), py = lp[1], pz = lp[2];
@@ -434,7 +445,7 @@ export class NeuralAnimal {
     if (sp.tusks) this.tusks = [0, 1].map(() => mesh(this.capsule, mat(sp.tusks, 0.4)));
   }
   render(A, B, f, dt) {
-    if (this.model) { const W = this.Wi; for (let i = 0; i < W.length; i++) W[i] = lerp(A[i], B[i], f); if (!globalThis.SOMA_ANIMAL_REST) { this.model.apply(W, this.ix, this.netRest, this.pawC); this.model.body?.update(this.pawC || this.contacts, this.speed, dt); } return; }
+    if (this.model) { const W = this.Wi; for (let i = 0; i < W.length; i++) W[i] = lerp(A[i], B[i], f); if (!globalThis.SOMA_ANIMAL_REST) { this.model.apply(W, this.ix, this.netRest, this.pawC, dt); this.model.body?.update(this.pawC || this.contacts, this.speed, dt); } return; }
     const T = this.THREE, V = (x, y, z) => new T.Vector3(x, y, z), sp = this.sp;
     const J = (n) => { const i = this.ix[n] * 3; return V(lerp(A[i], B[i], f), lerp(A[i + 1], B[i + 1], f), lerp(A[i + 2], B[i + 2], f)); };
     const limb = (o, a, b, r, flat = 1) => { const d = b.clone().sub(a), len = Math.max(1e-4, d.length()); o.position.copy(a).add(b).multiplyScalar(0.5); o.quaternion.setFromUnitVectors(V(0, 1, 0), d.multiplyScalar(1 / len)); o.scale.set(r, (len + 1.4 * r) / 3, r * flat); };

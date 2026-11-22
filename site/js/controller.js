@@ -6,11 +6,12 @@ import { legIndices, legState, footSep, upCrossings } from './library.js';
 import { rawFeatures } from './bank.js';
 
 const FPS = 30, DT = 1 / 30, LN2 = Math.log(2);
-// How fast a real body speeds up and brakes along its direction of travel ([speed up, brake] in m/s^2), measured
-// on the mocap here (100STYLE and NVIDIA clips, 0.2 s smoothing): walking reaches 2.6-3.1, jogging and running
-// 3.3-6, braking up to 6.7. The motion is planned within these limits so the network never gets targets that
-// only a sprinter's lunge could reach (the gameplay presets accelerate at up to 16 m/s^2). Turning keeps the preset.
-export const HUMAN_ACCEL = { walk: [2.5, 3.5], run: [4.5, 6], sprint: [6, 7], crouch: [2.5, 3.5] };
+// How fast a real body speeds up, brakes and turns ([speed up, brake, sideways] in m/s^2), measured on the mocap here
+// (100STYLE and NVIDIA clips, 0.2 s smoothing): walking reaches 2.6-3.1, jogging and running 3.3-6, braking up to
+// 6.7, sideways (turning) 1-3.5 at the 95th percentile. The motion is planned within these limits so the network
+// never gets targets that only a sprinter's lunge, a 15 m/s^2 stop or a 45 deg bank could reach (the gameplay
+// presets allow 16-20 m/s^2). Sharp turns therefore slow down first and curve, as people do.
+export const HUMAN_ACCEL = { walk: [2.5, 3.5, 3], run: [4.5, 6, 6], sprint: [6, 7, 7], crouch: [2.5, 3.5, 3] };
 function capHuman(dv, v, dt, acc, dec, lat) {
   const sp = Math.hypot(v[0], v[2]);
   if (sp < 0.3) { const l = Math.hypot(dv[0], dv[2]), c = acc * dt; return l > c ? [dv[0] * c / l, 0, dv[2] * c / l] : dv; }
@@ -396,7 +397,7 @@ export class Controller {
     const cap = Math.max(0, (M.vlen(vn) > M.vlen(state.v) ? s.acceleration : s.deceleration) * dt), dl = M.vlen(dv);
     if (dl > cap && dl > 1e-9) { dv = M.vscale(dv, cap / dl); an = M.vscale(dv, 1 / Math.max(dt, 1e-6)); }
     const lim = gait && s.humanAccel !== false ? HUMAN_ACCEL[gait] : null;
-    if (lim) { dv = capHuman(dv, state.v, dt, Math.min(s.acceleration, lim[0]), Math.min(s.deceleration, lim[1]), s.acceleration); an = M.vscale(dv, 1 / Math.max(dt, 1e-6)); }
+    if (lim) { dv = capHuman(dv, state.v, dt, Math.min(s.acceleration, lim[0]), Math.min(s.deceleration, lim[1]), Math.min(s.acceleration, lim[2])); an = M.vscale(dv, 1 / Math.max(dt, 1e-6)); }
     state.v = M.vadd(state.v, dv); state.a = an; state.p = M.vadd(state.p, M.vscale(state.v, dt));
   }
   simulate(goal, dt) { // smoothed command velocity (HUD, fingers, replan trigger)
@@ -406,7 +407,7 @@ export class Controller {
     if (Math.hypot(this.simVel[0], this.simVel[2]) > 0.3) this.simYaw = Math.atan2(this.simVel[0], this.simVel[2]);
   }
   rootState(k) { // position, horizontal velocity and heading of the buffer at local frame k
-    const b = this.buffer, k0 = Math.max(0, k - 2), p = M.P(b[k], 0), q = M.P(b[k0], 0), n = Math.max(1, k - k0);
+    const b = this.buffer; k = Math.min(Math.max(0, Math.floor(k) || 0), b.length - 1); const k0 = Math.max(0, k - 2), p = M.P(b[k], 0), q = M.P(b[k0], 0), n = Math.max(1, k - k0);
     const w = M.fk(b[k], this.sk.parents);
     return { p: [p[0], 0, p[2]], v: [(p[0] - q[0]) * FPS / n, 0, (p[2] - q[2]) * FPS / n], yaw: headingFromHips(M.P(w, this.iR), M.P(w, this.iL)) };
   }
@@ -506,7 +507,7 @@ export class Controller {
     }
     const before = this.display;
     this.buffer = [...this.buffer.slice(0, i0 - 1), ...frames];
-    this.contacts = [...this.contacts.slice(0, i0 - 1), ...contacts];
+    this.contacts = [...this.contacts.slice(0, i0 - 1), ...contacts]; this.syncContacts('jump');
     if (before) this.inert.transition(this.baseOut || before, this.basePrev || this.baseOut || before, this.sample(this.time), this.sample(this.time - DT), DT);
     this.epoch++; this.warps = []; this.planYaw = null; this.warpSincePlan = 0; this.softBlend = 0.45; this.snapT = 0.4;
     this.framesSincePlan = 1e6; this.sinceChange = 0; this.queue = [];
@@ -574,6 +575,8 @@ export class Controller {
     const lead = Math.ceil(this.latency * FPS) + s.replanLead;
     let k = Math.floor(now) + Math.max(1, lead);
     k = Math.min(Math.max(k, 3), this.buffer.length - 1);
+    if (!Number.isInteger(k) || this.buffer.length < 4) return; // never plan from outside the buffer (seen once on a stalled worker)
+    this.syncContacts('plan');
     if (!this.queue.length) this.presteer(goal, k);
     const action = this.queue.shift() || null;
     if (this.popRetry && !action) goal = this.throughSide(goal, k); // the last plan flipped the body: turn via 90 deg first
@@ -595,6 +598,9 @@ export class Controller {
     if (info.epoch !== this.epoch) { this.stats.discarded++; return; } // planned before an instant transition replaced the future
     const k = info.kAbs - this.base, now = this.frame, before = this.display;
     if (k < 3 || k > this.buffer.length) return; // stale (cannot happen with one request in flight)
+    // a result whose whole segment is already behind the playhead (worker stalled, tab in the background) would leave
+    // the buffer shorter than the playhead: keep the extended motion instead
+    if (now > k + res.frames.length - 4) { this.stats.discarded++; return; }
     if (!info.action && this.popRetry < 2 && maxBodyStep(res.frames, this.sk.names, 2) > POP_DEG) { // body flip: replan
       this.stats.popRejected++; this.popRetry++; this.framesSincePlan = 1e6; return;
     }
@@ -607,7 +613,7 @@ export class Controller {
       (this.stats.seams ||= []).push([+(worst * 57.3).toFixed(1), this.sk.names[wj]]); if (this.stats.seams.length > 60) this.stats.seams.shift();
     }
     this.buffer = [...this.buffer.slice(0, k), ...frames];
-    this.contacts = [...this.contacts.slice(0, k), ...res.contacts];
+    this.contacts = [...this.contacts.slice(0, k), ...(res.contacts || [])]; this.syncContacts('splice');
     const drop = Math.max(0, Math.floor(now) - 8);
     if (drop > 0) { this.buffer = this.buffer.slice(drop); this.contacts = this.contacts.slice(drop); this.time -= drop * DT; this.commitEnd -= drop; this.base += drop; }
     this.warps = []; // only one request is ever in flight, and it has just been spliced
@@ -617,9 +623,17 @@ export class Controller {
       this.inert.transition(this.baseOut || before, this.basePrev || this.baseOut || before, this.sample(this.time), this.sample(this.time - DT), DT);
     }
   }
+  // buffer and contacts must stay the same length (a mismatch once crashed extend() and plan() on a stalled worker)
+  syncContacts(where) {
+    const n = this.buffer.length, c = this.contacts; if (c.length === n) return;
+    (this.stats.contactFix ||= []).push(`${where}:${c.length}/${n}`); if (this.stats.contactFix.length > 20) this.stats.contactFix.shift();
+    if (c.length > n) c.length = n; else while (c.length < n) c.push((c[c.length - 1] || [1, 1, 1, 1]).slice());
+  }
   // append a copy of the last gait cycle (re-rooted, seam blended) so playback never stalls on a late result
   extend() {
+    this.syncContacts('extend');
     const b = this.buffer, e = b.length - 1, J = this.sk.names.length;
+    if (e < 0) return;
     let best = -1, bestCost = Infinity;
     for (let s = Math.max(1, e - 44); s <= e - 14; s++) {
       let c = 0;

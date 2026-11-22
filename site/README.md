@@ -133,6 +133,19 @@ Worst shoulder turn in one frame across the bank: 145 -> 25 deg. Response (sim, 
 run 0.23 s (was 0.38), 90 deg turn 0.08 s, sprint 0.11 s; a 180 deg reversal takes 0.6 s (was 0.5)
 and a stop from sprint 0.5-0.64 s (was 0.43), because the body now brakes like a person.
 
+### Turns and reversals at a run
+
+Planned motion now also turns within human limits (sideways acceleration: walk 3, run 6, sprint 7 m/s^2, from
+the mocap), so a sharp turn slows down and curves and a reversal brakes (about 0.5 s from a run), plants, pivots
+and pushes off. Before, the plan braked at 15-25 m/s^2 and turned at 16 m/s^2, which the network could only
+follow with a deep lunge (29 deg) or a 45 deg bank. Measured (frame by frame, run then reverse): peak lean
+29 -> 20 deg, no speed surge; 90 deg turn: lean 16-17 deg while slowing to about 1.7 m/s. A reversal now takes
+0.8 s to follow (was 0.6); starts, 90 deg turns and stops are unchanged. The bank's reversal from a run no
+longer borrows a sprint entry (same-family cost 0.25 -> 0.8).
+
+A result that arrives after the playhead has already passed its whole segment (stalled worker, tab in the
+background) is now discarded; splicing it collapsed the buffer and crashed the controller.
+
 ## Shooter-style movement (default preset)
 
 The default preset, **Shooter**, aims at the feel of third-person action games (movement only):
@@ -298,6 +311,16 @@ scratch, driving realistic skinned 3D models:
     bone on the second spine bone) follow the joint they sit on.
   - Dual-quaternion skinning was measured (CPU) and did not reduce skin stretch on these models, so the
     meshes keep three.js linear blend skinning.
+- **Feet on the ground**: the network plants its toe-tip joint, but each model's sole sits a different distance
+  from that joint (the fox's toe-end bones even reach below its paws). Each paw's lowest skin points (48 per paw)
+  are skinned every frame and a per-paw correction keeps a planted sole at the ground; a leg that cannot reach
+  lowers the body (up to 12 % of hip height) until every planted leg has slack again. Planted soles, median over
+  the rollout: 0.0 % of hip height for every species (before: up to 12-15 % floating: fox, rabbit, tiger, bear,
+  wolf hind feet; or 2-4 % sunk: elephant and fox hind feet).
+- **Rabbit legs**: the bounding gait copied the left legs onto the right ones, so each pair overlapped into one
+  leg from the side. The right legs now replay the left legs 67 ms (front) and 33 ms (hind) later, as rabbits land.
+- **Head and neck**: limited relative to the chest (head: yaw +-40 deg, nose 30 deg up to 50 deg down, roll +-10;
+  neck less) and smoothed (80 ms). Head turning relative to the chest: p99 290-520 -> 130-270 deg/s.
 - **Muscles, breathing, soft tissue**: a vertex-shader layer on each animal mesh (per-bone displacement along
   the normal, from a small float texture): loaded legs bulge (more when the joint below is flexed), the chest
   breathes 0.35 times a second at rest up to ~2.2 when sprinting (panting), and the belly rides the body's

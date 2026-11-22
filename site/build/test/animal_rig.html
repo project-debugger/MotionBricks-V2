@@ -52,13 +52,21 @@ try {
   const len0 = edges.map(([m, a, b]) => pos(m, a).distanceTo(pos(m, b)));
   const boneOf = (m, i) => { const si = m.geometry.attributes.skinIndex, sw = m.geometry.attributes.skinWeight; let best = 0, bw = -1; for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w > bw) { bw = w; best = si.getComponent(i, k); } } return m.skeleton.bones[best].name; };
   const net = new DogNet(meta, bin), a = new NeuralAnimal(THREE, scene, key, net, model), mdl = a.model;
+  // paw soles: vertices mostly skinned to the paw (last limb bone and everything below it)
+  const pawVerts = ['front', 'hind'].flatMap((kd) => ['L', 'R'].map((sd) => {
+    const l = mdl[kd][sd], bones = l.bones.filter(Boolean), last = bones[bones.length - 1], under = new Set();
+    last.traverse((o) => under.add(o)); const out = [];
+    for (const m of meshes) { const si = m.geometry.attributes.skinIndex, sw = m.geometry.attributes.skinWeight, n = m.geometry.attributes.position.count;
+      for (let i = 0; i < n; i++) { let w = 0; for (let k = 0; k < 4; k++) if (under.has(m.skeleton.bones[si.getComponent(i, k)])) w += sw.getComponent(i, k); if (w > 0.6) out.push([m, i]); } }
+    const step = Math.max(1, Math.floor(out.length / 300)); return out.filter((_, i) => i % step === 0);
+  }));
   const SCRIPT = [[0, null, 'run'], [2, [0, 1], 'walk'], [6, [0, 1], 'run'], [9, [1, 0], 'run'], [11.5, [0, 1], 'sprint'], [14, null, 'run'], [16, null, 'end']];
   const dt = 1 / 60, P = (o) => o.getWorldPosition(new THREE.Vector3()), deg = (x) => x * 57.2958;
   const limbs = [['front', 'L', 0], ['front', 'R', 1], ['hind', 'L', 2], ['hind', 'R', 3]];
-  const stats = { headModel: [], headNet: [], paw: limbs.map(() => []), bend: limbs.map(() => []), stretch: [], stretchDQ: [], worst: {}, tw: {}, sw: {} };
+  const stats = { headModel: [], headNet: [], sole: limbs.map(() => []), tipY: [], headSpd: [], headYaw: [], paw: limbs.map(() => []), bend: limbs.map(() => []), stretch: [], stretchDQ: [], worst: {}, tw: {}, sw: {} };
   const headDir = () => { const h = mdl.head, rq = mdl.restQ.get(h).clone().invert(), wq = h.getWorldQuaternion(new THREE.Quaternion()); return mdl.nose0.clone().sub(mdl.restP.get(h)).applyQuaternion(rq).applyQuaternion(wq).normalize(); };
   const pitch = (d) => deg(Math.asin(Math.max(-1, Math.min(1, d.y))));
-  let t = 0, n = 0, lastSeg = -1;
+  let t = 0, n = 0, lastSeg = -1, prevHQ = null;
   while (true) {
     let c = SCRIPT[0]; for (const s of SCRIPT) if (t >= s[0]) c = s;
     if (c[2] === 'end') break;
@@ -67,9 +75,14 @@ try {
     mdl.group.updateMatrixWorld(true);
     const W = a.Wi, V = (nm) => { const i = a.ix[nm] * 3; return new THREE.Vector3(W[i], W[i + 1], W[i + 2]); };
     stats.headModel.push(pitch(headDir())); stats.headNet.push(pitch(V('HeadEnd').sub(V('Head')).normalize()));
+    { const cq = mdl.spine[mdl.spine.length - 1].getWorldQuaternion(new THREE.Quaternion()), hq = cq.clone().invert().multiply(mdl.head.getWorldQuaternion(new THREE.Quaternion())); // head relative to the chest
+      if (prevHQ) stats.headSpd.push(deg(prevHQ.angleTo(hq)) / (10 * dt)); prevHQ = hq;
+      const hd = headDir().setY(0).normalize(), bf = V('Neck').sub(V('Spine1')).setY(0).normalize(); stats.headYaw.push(deg(Math.atan2(hd.clone().cross(bf).y, hd.dot(bf)))); }
     const fwd = V('Spine1').sub(V('Hips')).setY(0).normalize(), left = new THREE.Vector3(0, 1, 0).cross(fwd).normalize();
     for (const [kind, s, k] of limbs) {
       const l = mdl[kind][s], bones = l.bones.filter(Boolean), end = bones[bones.length - 1];
+      if ((a.pawC || a.contacts)[k] > 0.7 && pawVerts[k].length) { let lo = Infinity; for (const [m, i] of pawVerts[k]) lo = Math.min(lo, pos(m, i).y); stats.sole[k].push(lo / mdl.hips * 100);
+        const tipY = l.tip.reduce((acc, o) => acc + P(o).y, 0) / l.tip.length; (stats.tipY[k] ||= []).push(tipY / mdl.hips * 100); }
       if ((a.pawC || a.contacts)[k] > 0.5) { // paw direction on the ground: wrist/ankle bone -> toe tip, outward positive
         const tip = l.tip.reduce((acc, o) => acc.add(P(o)), new THREE.Vector3()).multiplyScalar(1 / l.tip.length), d = tip.sub(P(end)).setY(0); if (d.lengthSq() > 1e-8) { d.normalize(); stats.paw[k].push(deg(Math.atan2(d.dot(left) * (s === 'L' ? 1 : -1), d.dot(fwd)))); }
       }
@@ -95,8 +108,13 @@ try {
     }
   }
   const med = (x) => { const s = x.slice().sort((p, q2) => p - q2); return s.length ? +s[s.length >> 1].toFixed(1) : null; };
+  const q = (x, f) => { const s2 = x.slice().sort((a2, b2) => a2 - b2); return s2.length ? +s2[Math.min(s2.length - 1, Math.floor(s2.length * f))].toFixed(1) : null; };
+  const p10 = (x) => q(x, 0.1), p99 = (x) => q(x, 0.99), p05 = (x) => q(x, 0.05), p90b = (x) => q(x, 0.95);
   const p90 = (x) => { const s = x.slice().sort((p, q2) => p - q2); return s.length ? +s[Math.floor(s.length * 0.9)].toFixed(1) : null; };
   window.RESULT = { species: key, headPitch: { model: med(stats.headModel), net: med(stats.headNet), modelMin: +Math.min(...stats.headModel).toFixed(0) },
+    soleHeightPctOfHips: Object.fromEntries(limbs.map(([kd, s2, k]) => [kd + s2, stats.sole[k].length ? [p10(stats.sole[k]), med(stats.sole[k]), p90(stats.sole[k])] : null])),
+    soleOffsetPct: limbs.map(([kd, s2]) => +(mdl[kd][s2].sole / mdl.hips * 100).toFixed(1)), tipYPct: limbs.map((_, k) => med(stats.tipY[k] || [])), drop: +(mdl.drop / mdl.hips * 100).toFixed(1),
+    headDegPerSec: { p50: med(stats.headSpd), p99: p99(stats.headSpd), max: +Math.max(...stats.headSpd).toFixed(0) }, headYawVsBody: { p5: p05(stats.headYaw), p95: p90b(stats.headYaw) },
     pawOutward: Object.fromEntries(limbs.map(([kd, s, k]) => [kd + s, med(stats.paw[k])])),
     bendOffPlaneP90: Object.fromEntries(limbs.map(([kd, s, k]) => [kd + s, p90(stats.bend[k])])),
     stretch: { p99: +(Math.max(...stats.stretch.map((x) => x[0]))).toFixed(3), max: +(Math.max(...stats.stretch.map((x) => x[1]))).toFixed(2) },
