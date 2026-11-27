@@ -578,7 +578,7 @@ export class Controller {
     if (!Number.isInteger(k) || this.buffer.length < 4) return; // never plan from outside the buffer (seen once on a stalled worker)
     this.syncContacts('plan');
     if (!this.queue.length) this.presteer(goal, k);
-    const action = this.queue.shift() || null;
+    const action = this.queue.shift() || (cmd.hold && this.actions[cmd.hold] ? cmd.hold : null); // held pose (seated)
     if (this.popRetry && !action) goal = this.throughSide(goal, k); // the last plan flipped the body: turn via 90 deg first
     const { context, target, allowed, a } = this.buildRequest(cmd, goal, k, { action });
     const info = { kAbs: this.base + k, t0: performance.now(), action, warpSeq: this.warpSeq, epoch: this.epoch };

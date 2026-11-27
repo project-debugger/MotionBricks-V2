@@ -204,7 +204,8 @@ function command(dt) {
     if (input.sitT > 1.6) { input.pending.push('sit_idle'); input.sitT = 0; }
   }
   const action = input.pending.shift() || null;
-  return { move: [move[0] * mag, move[1] * mag], gait, action };
+  // while seated, every segment the controller plans targets the seated pose (not the standing idle)
+  return { move: [move[0] * mag, move[1] * mag], gait, action, hold: input.sitting && action !== 'stand_up' ? 'sit_idle' : null };
 }
 
 // ------------------------------------------------------------------ UI
