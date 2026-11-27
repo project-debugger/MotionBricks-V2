@@ -336,6 +336,11 @@ async function main() {
   $('#start').hidden = false;
   status(`The real SOMA network runs on this device. First download: about ${(models.models[S.model].bytes / 1e6).toFixed(0)} MB.`);
   $('#go').addEventListener('click', () => loadModel(S.model));
+  // a tap made while the page was still loading (index.src.html records it), or just before coi-serviceworker's
+  // one-time reload on the first visit (kept for 20 s in sessionStorage), starts the download now
+  let early = !!window.SOMA_WANT_START;
+  try { const t = +sessionStorage.getItem('soma-autostart'); sessionStorage.removeItem('soma-autostart'); if (t && Date.now() - t < 20000) early = true; } catch { /* storage blocked */ }
+  if (early) loadModel(S.model);
 
   $('#gear').addEventListener('click', () => { $('#panel').hidden = !$('#panel').hidden; });
   $('#close').addEventListener('click', () => { $('#panel').hidden = true; });

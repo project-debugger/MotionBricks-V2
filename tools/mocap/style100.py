@@ -264,8 +264,19 @@ def hinge_arms(sk: Skeleton, local: np.ndarray, hinges: dict | None = None) -> n
             y = y / np.maximum(np.linalg.norm(y, axis=-1, keepdims=True), 1e-9)
             return np.stack([x, y, np.cross(x, y)], axis=-1)
 
-        Bl = frame(v, np.broadcast_to(u, v.shape))            # Arm frame: wrist direction, elbow side
-        Bw = frame(H - S, E - S)                              # world: performer's wrist direction, elbow side
+        # The bending plane's normal: the hinge axis in the Arm frame, and in the world the normal of the performer's
+        # shoulder-elbow-wrist triangle. A nearly straight arm has no defined triangle, so there the performer's own
+        # upper-arm twist decides (the retargeted arm's rotation applied to the hinge axis): no 180 deg twist flips.
+        sgn = np.sign(np.cross(u, reach[np.argmin(np.abs(phis + np.radians(60)))]) @ axis) or 1.0
+        n_l = axis * sgn
+        tri = np.cross(E - S, H - S)
+        lens = np.linalg.norm(E - S, axis=1) * np.linalg.norm(H - S, axis=1)
+        wt = np.clip(np.linalg.norm(tri, axis=1) / np.maximum(lens * np.sin(np.radians(20)), 1e-9), 0, 1)[:, None]
+        n_orig = m3.quat_rotate(w[:, a_, 3:], np.broadcast_to(n_l, S.shape))
+        n_tri = tri / np.maximum(np.linalg.norm(tri, axis=1, keepdims=True), 1e-9)
+        n_w = wt * n_tri + (1 - wt) * n_orig
+        Bl = frame(v, np.broadcast_to(n_l, v.shape))          # Arm frame: wrist direction, bending-plane normal
+        Bw = frame(H - S, n_w)                                # world: performer's wrist direction, plane normal
         Wa = m3.normalize(m3.quat_from_matrix(Bw @ np.swapaxes(Bl, -1, -2)))
         Wf = m3.quat_mul(Wa, R[k])
         for j, q in ((a_, m3.quat_mul(m3.quat_conj(Wp), Wa)), (f_, R[k]), (h_, m3.quat_mul(m3.quat_conj(Wf), Wh))):

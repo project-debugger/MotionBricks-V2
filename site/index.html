@@ -129,6 +129,14 @@
     <button id="go">Download and play</button>
   </div>
 </div>
+<script>
+  // a tap on "Download and play" before the app has loaded (or just before coi-serviceworker's one-time reload) is
+  // remembered and honoured as soon as js/main.js is ready
+  document.getElementById('go').addEventListener('click', () => {
+    window.SOMA_WANT_START = true;
+    try { if (!window.crossOriginIsolated && 'serviceWorker' in navigator) sessionStorage.setItem('soma-autostart', String(Date.now())); } catch (e) { /* storage blocked */ }
+  });
+</script>
 <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js" } }</script>
 <script type="module" src="./js/main.js"></script>
 
