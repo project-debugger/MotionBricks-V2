@@ -50,13 +50,16 @@ also tried: same download, no measurable speed gain in the browser, higher joint
 **AI only (default preset).** The network's own motion and timing, as in NVIDIA's MotionBricks demos: the controller
 places a target pose (from motion capture) along your path and the network picks the segment's duration within one
 token (0.13 s) of the planned horizon, so speed, stride and timing are its own. No steering warps, time-warps,
-procedural lean, head look or foot IK, joint clamping, velocity-matched joins or pre-generated transitions; only the
-upstream endpoint correction and the relaxed hand pose for joints the network does not predict. Measured frame-stepped
-(`SOMA_DEBUG.step`): steady speeds walk 1.38, run 3.46, sprint 5.45, crouch 0.91 m/s (with no timing window at all
-the network overshot by about 20 %); half speed about 1.2 s after starting from standing (Shooter preset: 0.03-1.0 s,
-from its pre-generated transitions). Planted feet slide less than with the game-feel layers (walk median 0.07 vs
-0.11 m/s, run 0.22 vs 0.39, run 90th percentile 0.59 vs 1.96 m/s): steering warps dragged the planted feet. Controller
-sim with 0/400/800 ms of added delay: no failures, NaN frames or spikes.
+procedural lean, head look or foot IK, or velocity-matched joins. Kept: the upstream endpoint correction, the relaxed
+hand pose for joints the network does not predict, anatomical joint limits (without them the generated forearms
+occasionally flip), and the transition bank, which is the same network's own output generated ahead of time. A bank
+entry is only jumped to when it belongs to the same gait family and its first pose is within 100° (55° for stops) of
+the current pose on every body joint; the blend into it is slower the larger that difference. Measured frame-stepped
+(`SOMA_DEBUG.step`): steady speeds walk 1.38, run 3.44, sprint 5.48, crouch 0.98 m/s (with no timing window at all
+the network overshot by about 20 %); half speed after starting from standing: walk 0.20 s, run 0.23 s, sprint 0.53 s,
+crouch 0.97 s (without the bank about 1.2 s). Real-time pop check (headless Chromium, 13-18 fps, scripted
+walk/run/sprint/turn input): worst single-frame body joint rate 948-975 °/s, down from 2872 °/s (a 178° shin flip)
+before the mismatch check. Controller sim with 0/400/800 ms of added delay: no failures, NaN frames or spikes.
 
 The settings panel (gear icon) has presets (AI only, Shooter, Responsive, Balanced, Smooth), sliders for speeds,
 responsiveness, planning horizon, animation speed, smoothing, motion variety, the finger layer

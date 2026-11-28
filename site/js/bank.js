@@ -10,7 +10,8 @@ const FPS = 30, H = [10, 20, 30];
 // feature groups: path (6), facing along the path (6), feet positions (6), feet velocities (6), root velocity (2)
 const GROUPS = [[0, 6, 1.0], [6, 12, 1.4], [12, 18, 0.8], [18, 24, 1.2], [24, 26, 2.0]];
 export const NF = 26;
-const GAIT_MISMATCH = 2, SAME_FAMILY = 0.8, family = (g) => (g === 'run' || g === 'sprint' ? 'run' : g === 'crouch' || g === 'crouch_stop' ? 'crouch' : g);
+const GAIT_MISMATCH = 2, SAME_FAMILY = 0.8;
+export const family = (g) => (g === 'run' || g === 'sprint' ? 'run' : g === 'crouch' || g === 'crouch_stop' ? 'crouch' : g);
 
 // R(-yaw) for the yaw convention facing = (sin yaw, cos yaw): maps the facing direction to +Z
 const local = (g, yaw, p) => { const c = Math.cos(yaw), s = Math.sin(yaw), dx = p[0] - g[0], dz = p[1] - g[1]; return [c * dx - s * dz, s * dx + c * dz]; };
@@ -81,8 +82,10 @@ export class TransitionBank {
   weigh(raw) { const q = new Float64Array(NF); for (let d = 0; d < NF; d++) q[d] = raw[d] * this.w[d]; return q; }
   cost(q, i) { let c = 0; const o = i * NF; for (let d = 0; d < NF; d++) { const x = this.feat[o + d] - q[d]; c += x * x; } return c; }
   // best candidate: action entries only for that action; otherwise locomotion entries of the right posture
-  match(q, { crouch = false, action = null, pathOnly = false, speed = null, stopping = null, gait = null } = {}) {
-    let best = -1, bestCost = Infinity;
+  // best candidates, cheapest first (top = how many to return); match() is the single best
+  match(q, opts = {}) { const t = this.matchTop(q, opts, 1); return t.length ? t[0] : null; }
+  matchTop(q, { crouch = false, action = null, pathOnly = false, speed = null, stopping = null, gait = null } = {}, top = 8) {
+    let best = -1, bestCost = Infinity; const keep = [];
     // only enter where the bank is moving about as fast as the character is now (no gait-mismatch blends)
     const tol = speed === null ? Infinity : Math.max(0.8, 0.3 * speed);
     for (let pass = 0; pass < 2 && best < 0; pass++) for (let i = 0; i < this.cand.length; i++) {
@@ -96,8 +99,11 @@ export class TransitionBank {
       const gp = !gait || action || stopping || e.gait === gait ? 0 : family(e.gait) === family(gait) ? SAME_FAMILY : GAIT_MISMATCH;
       const c = (pathOnly ? this.costFeet(q, i) : this.cost(q, i)) + gp;
       if (c < bestCost) { bestCost = c; best = i; }
+      if (keep.length < top || c < keep[keep.length - 1].cost) {
+        keep.push({ ci: i, cost: c }); keep.sort((a, b) => a.cost - b.cost); if (keep.length > top) keep.pop();
+      }
     }
-    return best < 0 ? null : { ci: best, cost: bestCost };
+    return keep;
   }
   costPath(q, i) { let c = 0; const o = i * NF; for (let d = 0; d < 12; d++) { const x = this.feat[o + d] - q[d]; c += x * x; } return c; }
   costFeet(q, i) { let c = 0; const o = i * NF; for (let d = 12; d < NF; d++) { const x = this.feat[o + d] - q[d]; c += x * x; } return c; }

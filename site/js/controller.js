@@ -3,7 +3,7 @@
 import * as M from './math3d.js';
 import { applyLimits, headingFromHips, validFrames, MIN_TOKENS, MAX_TOKENS } from './codec.js';
 import { legIndices, legState, footSep, upCrossings } from './library.js';
-import { rawFeatures } from './bank.js';
+import { rawFeatures, family } from './bank.js';
 
 const FPS = 30, DT = 1 / 30, LN2 = Math.log(2);
 // How fast a real body speeds up, brakes and turns ([speed up, brake, sideways] in m/s^2), measured on the mocap here
@@ -92,7 +92,10 @@ class Inertializer {
     for (let j = 0; j < this.J; j++) {
       const a = M.qToScaledAxis(M.qmul(M.Q(src, j), M.qconj(M.Q(dst, j))));
       const b = M.qToScaledAxis(M.qmul(M.Q(srcPrev, j), M.qconj(M.Q(dstPrev, j))));
-      for (let k = 0; k < 3; k++) { this.ro[j * 3 + k] = a[k]; this.rv[j * 3 + k] = (a[k] - b[k]) / dt; }
+      // offset velocity, capped: near 180 deg the two offsets can sit on opposite sides and the raw difference explodes
+      let v = [(a[0] - b[0]) / dt, (a[1] - b[1]) / dt, (a[2] - b[2]) / dt]; const n = Math.hypot(v[0], v[1], v[2]);
+      if (n > 6) v = v.map((x) => x * 6 / n);
+      for (let k = 0; k < 3; k++) { this.ro[j * 3 + k] = a[k]; this.rv[j * 3 + k] = v[k]; }
     }
     const s = M.P(src, 0), sp = M.P(srcPrev, 0), d = M.P(dst, 0), dp = M.P(dstPrev, 0);
     for (let k = 0; k < 3; k++) { this.po[k] = s[k] - d[k]; this.pv[k] = Math.max(-5, Math.min(5, ((s[k] - sp[k]) - (d[k] - dp[k])) / dt)); }
@@ -367,6 +370,7 @@ export class Controller {
     this.torso = new TorsoCalm(sk); this.lean = new Lean();
     this.look = new LookAt(sk);
     this.cycleJoints = LEG_ARM.map((n) => sk.names.indexOf(n)).filter((j) => j > 0);
+    this.bodyJoints = BODY_JOINTS.map((n) => sk.names.indexOf(n)).filter((j) => j > 0); // (root excluded: jumps realign it)
     this.iR = sk.names.indexOf('RightLeg'); this.iL = sk.names.indexOf('LeftLeg');
     this.display = null; this.prevDisplay = null;
     this.events = []; // e.g. {type:'sit', pos, yaw, seat}
@@ -479,9 +483,15 @@ export class Controller {
     if (i0 < 2 || i0 + 1 >= this.buffer.length) return false;
     const q = this.bank.weigh(this.queryRaw(i0, this.desiredPath(i0, goal, cmd.gait)));
     const rs = this.rootState(i0), speedNow = Math.hypot(rs.v[0], rs.v[2]);
-    const m = this.bank.match(q, { crouch: cmd.gait === 'crouch', action: cmd.action || null, speed: speedNow, stopping: M.vlen(goal) < 0.5, gait: cmd.gait });
+    const opts = { crouch: cmd.gait === 'crouch', action: cmd.action || null, speed: speedNow, stopping: M.vlen(goal) < 0.5, gait: cmd.gait };
+    // the cheapest candidate whose first pose is close to the current one (a far pose would swing a limb through the blend)
+    const fam = cmd.action || opts.stopping ? null : family(cmd.gait); // never another gait family (a walking turn is no sprint start)
+    const tops = this.bank.matchTop(q, opts, 16).filter((t) => !fam || family(this.bank.entries[this.bank.cand[t.ci].ei].gait) === fam);
     this.stats.instantWhy = 'nomatch';
-    if (!m) return false;
+    if (!tops.length) return false;
+    let m = null, mis = Infinity;
+    for (const t of tops) { const d = this.jumpMismatch(t.ci); if (d <= (opts.stopping ? 55 : 100)) { m = t; this.jumpMis = d; break; } mis = Math.min(mis, d); }
+    if (!m) { this.stats.instantWhy = 'mismatch'; this.stats.lastMismatch = Math.round(mis); return false; }
     this.stats.instantWhy = 'kept';
     if (!cmd.action && i0 + 31 < this.buffer.length) { // keep the current future if it already follows the new path
       const fut = [10, 20, 30].map((h) => this.legAt(i0 + h));
@@ -494,6 +504,13 @@ export class Controller {
     this.stats.instantWhy = 'jump';
     this.jump(m.ci);
     return true;
+  }
+  jumpMismatch(ci) { // largest local rotation difference (deg) of the body joints between now and the transition's first frame
+    const cnd = this.bank.cand[ci], cur = this.baseOut || this.sample(this.time), nxt = this.bank.pose(cnd.ei, cnd.f);
+    let worst = 0, wj = -1;
+    for (const j of this.bodyJoints) { const d = M.vlen(M.qToScaledAxis(M.qmul(M.Q(cur, j), M.qconj(M.Q(nxt, j))))); if (d > worst) { worst = d; wj = j; } }
+    this.stats.mismatchJoint = this.sk.names[wj];
+    return worst * 57.2958;
   }
   jump(ci) {
     const cnd = this.bank.cand[ci], e = this.bank.entries[cnd.ei], f0 = cnd.f, i0 = Math.floor(this.frame);
@@ -589,7 +606,7 @@ export class Controller {
     this.pending = true;
     this.framesSincePlan = 0; this.lastGoal = goal.slice();
     this.planYaw = Math.hypot(goal[0], goal[2]) > 0.5 && !a ? Math.atan2(goal[0], goal[2]) : null; this.warpSincePlan = 0;
-    this.generate({ context, target, allowed, anatomical: s.anatomical && !s.pureAI, velocityMatching: s.velocityMatching && !s.pureAI })
+    this.generate({ context, target, allowed, anatomical: s.anatomical, velocityMatching: s.velocityMatching && !s.pureAI })
       .then((res) => this.splice(res, info))
       .catch((e) => { this.stats.failures++; this.stats.error = String(e); })
       .finally(() => { this.pending = false; });
@@ -710,7 +727,7 @@ export class Controller {
     dt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0, dt)) : 0; // a first frame can report a slightly negative step
     const goal = this.goalVelocity(cmd);
     let actionDone = false;
-    if (this.bank && s.instant !== false && !s.pureAI && this.frame >= this.commitEnd) {
+    if (this.bank && s.instant !== false && this.frame >= this.commitEnd) { // pre-generated by the same network: still AI motion
       const moving = M.vlen(goal) > 0.5, was = M.vlen(this.bankGoal) > 0.5, crouch = cmd.gait === 'crouch';
       const ang = moving && was ? Math.abs(M.wrap(Math.atan2(goal[0], goal[2]) - Math.atan2(this.bankGoal[0], this.bankGoal[2]))) : 0;
       const event = cmd.action ? this.bank.actions.has(cmd.action)
@@ -735,7 +752,8 @@ export class Controller {
     if (need && !this.pending) this.plan(cmd, goal);
     if (!committed && !s.pureAI) this.steer(goal, dt);
     this.softBlend = Math.max(0, (this.softBlend || 0) - dt);
-    this.inert.halflife = Math.max(s.transitionDuration / 2.5, this.softBlend > 0 ? 0.14 : 0, 1e-3); // softer blend right after an instant transition
+    // softer blend right after an instant transition, slower the further its first pose was from the current one
+    this.inert.halflife = Math.max(s.transitionDuration / 2.5, this.softBlend > 0 ? 0.14 + (this.jumpMis || 0) / 500 : 0, 1e-3);
     while (this.buffer.length - 1 - (this.frame + dt * s.playbackRate * (1 + (s.snap || 0)) * FPS) < 2) this.extend();
     // snappy: the first 0.4 s after an instant start/stop/turn play faster (easing back to normal speed)
     this.snapT = Math.max(0, (this.snapT || 0) - dt); const u = this.snapT / 0.4, boost = s.pureAI ? 1 : 1 + (s.snap || 0) * u * u * (3 - 2 * u);
@@ -752,7 +770,7 @@ export class Controller {
     if (!P && (s.lean ?? 0) > 0) pose = this.lean.apply(pose, s.lean, dt);
     if (!P && s.footLocking) pose = this.feet.apply(pose, this.sampleContacts(this.time), dt);
     if (stages) stages.feet = pose;
-    if (!P && s.anatomical) pose = applyLimits(this.limits, pose);
+    if (s.anatomical) pose = applyLimits(this.limits, pose); // removes the network's impossible elbow/knee twists (adds no motion)
     if (stages) stages.limits = pose;
     if (!P && s.fingers) pose = this.fingers.apply(pose, Math.hypot(this.simVel[0], this.simVel[2]), dt);
     if (!P && (s.torsoCalm ?? 0) > 0) pose = this.torso.apply(pose, s.torsoCalm, dt);
