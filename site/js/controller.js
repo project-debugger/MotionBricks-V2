@@ -565,7 +565,11 @@ export class Controller {
         const w = this.lib.match(vl, 0, crouch, s.variation, this.rand);
         target = place(this.lib.windows[w], fp, fyaw);
       }
-      allowed = forceT ? [forceT] : s.durationMode === 'horizon' ? [T] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
+      if (forceT) allowed = [forceT];
+      else if (s.pureAI) { // the network picks the timing, within a window around the planned horizon (speed stays plausible)
+        const lo = Math.max(MIN_TOKENS, s.minTokens, Math.min(needT, MAX_TOKENS), T - (s.aiSlack ?? 2)), hi = Math.min(MAX_TOKENS, Math.max(lo, T + (s.aiSlack ?? 2)));
+        allowed = []; for (let t = lo; t <= hi; t++) allowed.push(t);
+      } else allowed = s.durationMode === 'horizon' ? [T] : allowed.filter((t) => t >= Math.min(needT, MAX_TOKENS));
     }
     return { context, target, allowed, a };
   }
@@ -577,7 +581,7 @@ export class Controller {
     k = Math.min(Math.max(k, 3), this.buffer.length - 1);
     if (!Number.isInteger(k) || this.buffer.length < 4) return; // never plan from outside the buffer (seen once on a stalled worker)
     this.syncContacts('plan');
-    if (!this.queue.length) this.presteer(goal, k);
+    if (!this.queue.length && !s.pureAI) this.presteer(goal, k);
     const action = this.queue.shift() || (cmd.hold && this.actions[cmd.hold] ? cmd.hold : null); // held pose (seated)
     if (this.popRetry && !action) goal = this.throughSide(goal, k); // the last plan flipped the body: turn via 90 deg first
     const { context, target, allowed, a } = this.buildRequest(cmd, goal, k, { action });
@@ -585,7 +589,7 @@ export class Controller {
     this.pending = true;
     this.framesSincePlan = 0; this.lastGoal = goal.slice();
     this.planYaw = Math.hypot(goal[0], goal[2]) > 0.5 && !a ? Math.atan2(goal[0], goal[2]) : null; this.warpSincePlan = 0;
-    this.generate({ context, target, allowed, anatomical: s.anatomical, velocityMatching: s.velocityMatching })
+    this.generate({ context, target, allowed, anatomical: s.anatomical && !s.pureAI, velocityMatching: s.velocityMatching && !s.pureAI })
       .then((res) => this.splice(res, info))
       .catch((e) => { this.stats.failures++; this.stats.error = String(e); })
       .finally(() => { this.pending = false; });
@@ -706,7 +710,7 @@ export class Controller {
     dt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0, dt)) : 0; // a first frame can report a slightly negative step
     const goal = this.goalVelocity(cmd);
     let actionDone = false;
-    if (this.bank && s.instant !== false && this.frame >= this.commitEnd) {
+    if (this.bank && s.instant !== false && !s.pureAI && this.frame >= this.commitEnd) {
       const moving = M.vlen(goal) > 0.5, was = M.vlen(this.bankGoal) > 0.5, crouch = cmd.gait === 'crouch';
       const ang = moving && was ? Math.abs(M.wrap(Math.atan2(goal[0], goal[2]) - Math.atan2(this.bankGoal[0], this.bankGoal[2]))) : 0;
       const event = cmd.action ? this.bank.actions.has(cmd.action)
@@ -729,12 +733,12 @@ export class Controller {
     const fresh = this.sinceChange < 0.6 && this.framesSincePlan >= s.replanInterval; // keep refining right after input changes
     const need = low || (!committed && ((changed && this.framesSincePlan >= 2) || fresh || this.queue.length));
     if (need && !this.pending) this.plan(cmd, goal);
-    if (!committed) this.steer(goal, dt);
+    if (!committed && !s.pureAI) this.steer(goal, dt);
     this.softBlend = Math.max(0, (this.softBlend || 0) - dt);
     this.inert.halflife = Math.max(s.transitionDuration / 2.5, this.softBlend > 0 ? 0.14 : 0, 1e-3); // softer blend right after an instant transition
     while (this.buffer.length - 1 - (this.frame + dt * s.playbackRate * (1 + (s.snap || 0)) * FPS) < 2) this.extend();
     // snappy: the first 0.4 s after an instant start/stop/turn play faster (easing back to normal speed)
-    this.snapT = Math.max(0, (this.snapT || 0) - dt); const u = this.snapT / 0.4, boost = 1 + (s.snap || 0) * u * u * (3 - 2 * u);
+    this.snapT = Math.max(0, (this.snapT || 0) - dt); const u = this.snapT / 0.4, boost = s.pureAI ? 1 : 1 + (s.snap || 0) * u * u * (3 - 2 * u);
     this.time = Math.min(this.time + dt * s.playbackRate * boost, (this.buffer.length - 1) * DT);
     this.framesSincePlan += dt * FPS; // game frames, independent of the render rate
     let pose = this.sample(this.time);
@@ -743,16 +747,21 @@ export class Controller {
     if (this.inert.active) pose = this.inert.apply(pose, dt);
     this.basePrev = this.baseOut; this.baseOut = pose; // motion stream before IK and procedural layers (what transitions blend)
     if (stages) stages.inert = pose;
-    if ((s.lean ?? 0) > 0) pose = this.lean.apply(pose, s.lean, dt);
-    if (s.footLocking) pose = this.feet.apply(pose, this.sampleContacts(this.time), dt);
+    // AI-only: what the network generated is what you see (no procedural layers on top)
+    const P = !!s.pureAI;
+    if (!P && (s.lean ?? 0) > 0) pose = this.lean.apply(pose, s.lean, dt);
+    if (!P && s.footLocking) pose = this.feet.apply(pose, this.sampleContacts(this.time), dt);
     if (stages) stages.feet = pose;
-    if (s.anatomical) pose = applyLimits(this.limits, pose);
+    if (!P && s.anatomical) pose = applyLimits(this.limits, pose);
     if (stages) stages.limits = pose;
-    if (s.fingers) pose = this.fingers.apply(pose, Math.hypot(this.simVel[0], this.simVel[2]), dt);
-    if ((s.torsoCalm ?? 0) > 0) pose = this.torso.apply(pose, s.torsoCalm, dt);
-    if (s.lookAt ?? true) pose = this.look.apply(pose, goal, dt, 45);
+    if (!P && s.fingers) pose = this.fingers.apply(pose, Math.hypot(this.simVel[0], this.simVel[2]), dt);
+    if (!P && (s.torsoCalm ?? 0) > 0) pose = this.torso.apply(pose, s.torsoCalm, dt);
+    if (!P && (s.lookAt ?? true)) pose = this.look.apply(pose, goal, dt, 45);
     if (stages) { stages.final = pose; this.lastStages = stages; }
-    if (s.smoothing > 0 && this.display) {
+    // root speed of what is shown (the network's own speed, for the HUD)
+    if (this.prevRoot && dt > 0) { const r = M.P(pose, 0); this.shownSpeed = 0.8 * (this.shownSpeed || 0) + 0.2 * Math.hypot(r[0] - this.prevRoot[0], r[2] - this.prevRoot[2]) / dt; }
+    this.prevRoot = M.P(pose, 0);
+    if (!P && s.smoothing > 0 && this.display) {
       const alpha = 1 - Math.pow(s.smoothing, dt * 30), out = new Float64Array(pose);
       for (let j = 1; j < this.sk.names.length; j++) M.setQ(out, j, M.qSlerp(M.Q(this.display, j), M.Q(pose, j), alpha));
       pose = out;

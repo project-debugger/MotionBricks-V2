@@ -47,7 +47,18 @@ are about 3x slower than INT8 on one WebAssembly thread (0.75-1.2 s vs 0.23-0.31
 in headless Chromium on this machine), which made slow phones fall behind. An all-INT8 model was
 also tried: same download, no measurable speed gain in the browser, higher joint error (8.96 cm).
 
-The settings panel (gear icon) has presets (Responsive, Balanced, Smooth), sliders for speeds,
+**AI only (default preset).** The network's own motion and timing, as in NVIDIA's MotionBricks demos: the controller
+places a target pose (from motion capture) along your path and the network picks the segment's duration within one
+token (0.13 s) of the planned horizon, so speed, stride and timing are its own. No steering warps, time-warps,
+procedural lean, head look or foot IK, joint clamping, velocity-matched joins or pre-generated transitions; only the
+upstream endpoint correction and the relaxed hand pose for joints the network does not predict. Measured frame-stepped
+(`SOMA_DEBUG.step`): steady speeds walk 1.38, run 3.46, sprint 5.45, crouch 0.91 m/s (with no timing window at all
+the network overshot by about 20 %); half speed about 1.2 s after starting from standing (Shooter preset: 0.03-1.0 s,
+from its pre-generated transitions). Planted feet slide less than with the game-feel layers (walk median 0.07 vs
+0.11 m/s, run 0.22 vs 0.39, run 90th percentile 0.59 vs 1.96 m/s): steering warps dragged the planted feet. Controller
+sim with 0/400/800 ms of added delay: no failures, NaN frames or spikes.
+
+The settings panel (gear icon) has presets (AI only, Shooter, Responsive, Balanced, Smooth), sliders for speeds,
 responsiveness, planning horizon, animation speed, smoothing, motion variety, the finger layer
 and the (off by default) body-rotation assist, and toggles for foot locking, anatomical joint
 limits, procedural fingers, velocity-matched joins, head-leads-turns, instant response and the

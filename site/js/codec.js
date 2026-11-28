@@ -181,9 +181,18 @@ export function applyLimits(bl, pose, relax = false) {
   return out;
 }
 
+// joints the network does not predict (fingers, eyes, ...) take the relaxed pose; nothing it predicts is changed
+export function relaxPose(bl, pose) {
+  const out = new Float64Array(pose);
+  for (const [j, q] of bl.relaxed) M.setQ(out, j, q);
+  return out;
+}
+
 // Full generation post-process (engine.generate_batch): decode -> relax -> endpoint -> velocity -> limits
+// opts.constrain === false (AI-only mode): relax the unpredicted joints only, no joint clamping
 export function postProcess(b, bl, pred, tokens, align, guides, nTargets, opts) {
   let { frames, contacts } = decode(b, pred, tokens, align);
+  if (bl && opts.constrain === false) { frames = frames.map((f) => relaxPose(bl, f)); bl = null; }
   if (bl) frames = frames.map((f) => applyLimits(bl, f, true));
   if (opts.correctEndpoints !== false) frames = endpointCorrection(frames, guides[3], guides[4]);
   if (opts.velocityMatching) frames = velocityMatching(frames, guides[2], guides[3], guides[4], nTargets >= 2 ? guides[5] : null, opts.tau || 4);

@@ -65,8 +65,8 @@ async function generate(msg) {
   const out = await session.run(inputs);
   const t2 = performance.now();
   const tokens = Number(out.pred_num_tokens.data[0]);
-  const { frames, contacts } = postProcess(binding, msg.anatomical ? limits : null, out.pred_global_motions.data, tokens, align,
-    guides, nT, { velocityMatching: msg.velocityMatching, correctEndpoints: msg.correctEndpoints !== false });
+  const { frames, contacts } = postProcess(binding, limits, out.pred_global_motions.data, tokens, align,
+    guides, nT, { velocityMatching: msg.velocityMatching, correctEndpoints: msg.correctEndpoints !== false, constrain: !!msg.anatomical });
   const flat = new Float64Array(frames.length * J * 7);
   frames.forEach((f, i) => flat.set(f, i * J * 7));
   const cflat = new Float32Array(contacts.flat());

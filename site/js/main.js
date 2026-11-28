@@ -8,7 +8,7 @@ import { ClipLibrary, legIndices } from './library.js';
 import { TransitionBank } from './bank.js';
 import { BodyFX } from './body.js';
 import { registerFightActions } from './fight.js';
-import { PRESETS, DEFAULTS } from './settings.js';
+import { PRESETS, DEFAULTS, PRESET_LABELS } from './settings.js';
 
 const $ = (s) => document.querySelector(s);
 const BASE = new URL('.', location.href).href;
@@ -20,6 +20,7 @@ try { Object.assign(S, JSON.parse(localStorage.getItem('soma-settings') || '{}')
 const save = () => { try { localStorage.setItem('soma-settings', JSON.stringify(S)); } catch { /* ignore */ } };
 if ((S.settingsVersion || 1) < 2) Object.assign(S, { fingerCurlRun: DEFAULTS.fingerCurlRun, torsoCalm: DEFAULTS.torsoCalm, settingsVersion: 2 }); // new defaults reach saved settings
 if (S.settingsVersion < 3) Object.assign(S, PRESETS.shooter, { preset: 'shooter', settingsVersion: 3 });
+if (S.settingsVersion < 4) Object.assign(S, PRESETS.ai, { preset: 'ai', settingsVersion: 4 }); // AI only became the default
 
 // ------------------------------------------------------------------ data
 async function getJSON(p) { const r = await fetch(BASE + p); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.json(); }
@@ -227,7 +228,8 @@ function buildPanel(models, onModel, onWalkStyle) {
   p.innerHTML = `<h3>Walk style</h3><div class="segs" id="walkstyles"><button class="seg" data-walkstyle="natural">Natural<small>default</small></button>${WALK_STYLES.map((w) => `<button class="seg" data-walkstyle="${w.key}">${w.label}<small>${w.pace.toFixed(2)} m/s</small></button>`).join('')}</div>
     <p class="note" style="margin-top:6px" id="walkstyle-note">Real walking motion capture (100STYLE, CC BY 4.0) used as targets for the SOMA network; a style walks at its own pace. Running is unchanged.</p>
     <h3>Model</h3><div class="segs" id="models">${mrow}</div>
-    <h3>Preset</h3><div class="segs" id="presets">${Object.keys(PRESETS).map((k) => `<button class="seg" data-preset="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
+    <h3>Preset</h3><div class="segs" id="presets">${Object.keys(PRESETS).map((k) => `<button class="seg" data-preset="${k}">${PRESET_LABELS[k] || k}</button>`).join('')}</div>
+    <p class="note" style="margin-top:6px">AI only: the network's own motion and speed, nothing added on top (as in NVIDIA's MotionBricks demos). The other presets add game-feel layers (steering, instant transitions, foot locking, lean).</p>
     <h3>Tuning</h3>${SLIDERS.map(([k, l, a, b, st, u]) => `<label class="sl"><span>${l} <b id="v-${k}"></b></span><input id="s-${k}" type="range" min="${a}" max="${b}" step="${st}" data-unit="${u}"></label>`).join('')}
     <h3>Quality passes</h3>${TOGGLES.map(([k, l]) => `<label class="tg"><input id="t-${k}" type="checkbox"><span>${l}</span></label>`).join('')}
     <label class="tg"><input id="t-dur" type="checkbox"><span>Let the model choose segment length (smoother, slower to react)</span></label>
@@ -365,9 +367,10 @@ async function main() {
     else if (ready) pose = ctrl.display;
     else pose = ctrl.display || ctrl.buffer[3];
     const tp = performance.now(); PERF.update += tp - tu;
-    if (S.bodyFX !== false) pose = bodyFX.posePass(pose, dt);
+    const bodyOn = S.bodyFX !== false && !S.pureAI; // AI-only: no procedural body layer
+    if (bodyOn) pose = bodyFX.posePass(pose, dt);
     const world = M.fk(pose, sk.parents);
-    if (S.bodyFX !== false) bodyFX.update(pose, world, ready ? ctrl.sampleContacts(ctrl.time) : null, Math.hypot(ctrl.simVel[0], ctrl.simVel[2]), S.sprintSpeed, dt);
+    if (bodyOn) bodyFX.update(pose, world, ready ? ctrl.sampleContacts(ctrl.time) : null, Math.hypot(ctrl.simVel[0], ctrl.simVel[2]), S.sprintSpeed, dt);
     else bodyFX.off();
     for (let j = 0; j < J; j++) { R.bones[j].position.set(world[j * 7], world[j * 7 + 1], world[j * 7 + 2]); R.bones[j].quaternion.set(world[j * 7 + 3], world[j * 7 + 4], world[j * 7 + 5], world[j * 7 + 6]); }
     const hx = world[0], hz = world[2], k = 1 - Math.exp(-dt * 6);
@@ -393,7 +396,7 @@ async function main() {
     fpsAcc += dt; fpsN++;
     if (fpsAcc > 0.5) {
       $('#hud-fps').textContent = `${(fpsN / fpsAcc).toFixed(0)} fps${governor.level ? ' · lite ' + governor.level : ''}`;
-      $('#hud-speed').textContent = `${Math.hypot(ctrl.simVel[0], ctrl.simVel[2]).toFixed(1)} m/s`;
+      $('#hud-speed').textContent = `${(S.pureAI ? ctrl.shownSpeed || 0 : Math.hypot(ctrl.simVel[0], ctrl.simVel[2])).toFixed(1)} m/s`;
       $('#hud-gens').textContent = `${ctrl.stats.generations}`;
       $('#hud-lat').textContent = `${(ctrl.latency * 1000).toFixed(0)} ms`;
       if (ctrl.stats.failures) $('#hud-err').textContent = ctrl.stats.error.slice(0, 80);
